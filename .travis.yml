@@ -1,0 +1,22 @@
+language: go
+go:
+- 1.4
+before_install:
+- go get github.com/golang/lint/golint
+- go get github.com/axw/gocov/gocov
+- go get github.com/mattn/goveralls
+- if ! go get code.google.com/p/go.tools/cmd/cover; then go get golang.org/x/tools/cmd/cover;
+  fi
+script:
+- '[ "${TRAVIS_PULL_REQUEST}" != "false" ] || $HOME/gopath/bin/goveralls -service=travis-ci
+  -repotoken $COVERALLS_TOKEN'
+- "$HOME/gopath/bin/golint ./..."
+- go vet
+- go test -v ./...
+notifications:
+  email:
+    on_success: never
+    on_failure: change
+env:
+  global:
+    secure: y6b+FtOxngmJ/4Lh8teWH7SQiIaksYbN29RUpooEz3oYAYsi2tM+9FzHI2Aj+gzLla2HpQhvryQKO5NuH2xkZyKSau93FxIUkfKHg+79Aq2jb29/7AP4Kx114s4Jg9LBihtvtlIcPzBS9Z+hO3JpNpkVsjM2DNtDwgP4uo7uuCQLma1Df77UkR8Su3bCYQJTb8M2zKIoYqB5yHKIqd2BwPbtaG2bPc4ddWyjJU/rYBAkzmus3U892N0ZvGF1tvgyGgZQkInKVONQU8dpE1KAIFuOrGxpsmXVzn2qw5wfiA2FSlQYI8wuDRinxVo0yfiQ5ls2JlEIanjTG3JiztOvA+vCUpGFvMjTCuaCIT9h8N6Kpn4Bd8yPqyDKjlmmOR9ibGvMNsuAZGKVO8k45z91th/YvSHeXnGy6m7203hCjOm3+BGH7s0E+O75Knf2M8Nk6a0kPk9z83M5h+WECDsEJ99DQgdr0nDoTvgDXvuqBfDAHTUKKhmN1KWkL8Y0mJ9LReDPnXNSQLKE/7k5N4RE1Yv9r4Ap2fuO6rPNf8sAmiBIXzI3Rsh+LcqfmWyT6es8VrLSx5wWfYANg25t3y/pzeIppsV+Y+GtR6CgwST94+97Kq+3+f01Wm8fSE7pYGCJ5ZTJwMiKGlWGR89PhEszKpIoTYcQbZSQ7OuJjyniUMM=
