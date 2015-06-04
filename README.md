@@ -11,6 +11,15 @@ Usage
 
 Write and Read concurrently, and independently.
 
+To explain further, if you need to write to multiple places you can use io.MultiWriter,
+if you need multiple Readers on something you can use io.TeeReader. If you want concurrency you can use io.Pipe(). 
+
+However all of these methods "tie" each Read/Write together, your readers can't read from different places in the stream, each write must be distributed to all readers in sequence. 
+
+This package provides a way for multiple Readers to read off the same Writer, without waiting for the others. This is done by writing to a "File" interface which buffers the input so it can be read at any time from many independent readers. Readers can even be created while writing or after the stream is closed. They will all see a consistent view of the stream and will block until the section of the stream they request is written, all while being unaffected by the actions of the other readers.
+
+The use case for this stems from my other project djherbis/fscache. I needed a byte caching mechanism which allowed many independent clients to have access to the data while it was being written, rather than re-generating the byte stream for each of them or waiting for a complete copy of the stream which could be stored and then re-used.
+
 ```go
 import(
 	"io"
