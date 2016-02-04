@@ -31,9 +31,7 @@ func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
 			case n != 0 && err == nil:
 				return n, err
 			case err == io.EOF:
-				r.s.b.RUnlock()
 				r.s.b.Wait()
-				r.s.b.RLock()
 			case err != nil:
 				return n, err
 			}
@@ -64,9 +62,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 			case n != 0 && err == nil:
 				return n, err
 			case err == io.EOF:
-				r.s.b.RUnlock()
 				r.s.b.Wait()
-				r.s.b.RLock()
 			case err != nil:
 				return n, err
 			}

@@ -1,49 +1,34 @@
 package stream
 
-import "sync"
-
-type closer chan struct{}
-
-func (a closer) Close() error {
-	close(a)
-	return nil
-}
-
-func (a closer) IsOpen() bool {
-	select {
-	case <-a:
-		return false
-	default:
-		return true
-	}
-}
-
-type noLock struct{}
-
-func (l noLock) Lock()   {}
-func (l noLock) Unlock() {}
+import (
+	"sync"
+	"sync/atomic"
+)
 
 type broadcaster struct {
 	sync.RWMutex
-	closer
+	closed uint32
 	*sync.Cond
 }
 
 func newBroadcaster() *broadcaster {
-	return &broadcaster{
-		Cond:   sync.NewCond(noLock{}),
-		closer: make(closer),
-	}
+	var b broadcaster
+	b.Cond = sync.NewCond(b.RWMutex.RLocker())
+	return &b
 }
 
 func (b *broadcaster) Wait() {
-	if b.closer.IsOpen() {
+	if b.IsOpen() {
 		b.Cond.Wait()
 	}
 }
 
+func (b *broadcaster) IsOpen() bool {
+	return atomic.LoadUint32(&b.closed) == 0
+}
+
 func (b *broadcaster) Close() error {
-	b.closer.Close()
+	atomic.StoreUint32(&b.closed, 1)
 	b.Cond.Broadcast()
 	return nil
 }

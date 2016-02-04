@@ -52,6 +52,8 @@ func (s *Stream) Write(p []byte) (int, error) {
 func (s *Stream) Close() error {
 	defer s.dec()
 	defer s.b.Close()
+	s.b.Lock()
+	defer s.b.Unlock()
 	return s.file.Close()
 }
 
