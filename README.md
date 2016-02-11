@@ -6,6 +6,7 @@ stream
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE.txt)
 [![Build Status](https://travis-ci.org/djherbis/stream.svg?branch=master)](https://travis-ci.org/djherbis/stream)
 [![Coverage Status](https://coveralls.io/repos/djherbis/stream/badge.svg?branch=master)](https://coveralls.io/r/djherbis/stream?branch=master)
+[![Go Report Card](https://goreportcard.com/badge/github.com/djherbis/stream)](https://goreportcard.com/report/github.com/djherbis/stream)
 
 Usage
 ------------
