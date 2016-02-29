@@ -23,6 +23,8 @@ This package provides a way for multiple Readers to read off the same Writer, wi
 The use case for this stems from my other project djherbis/fscache. I needed a byte caching mechanism which allowed many independent clients to have access to the data while it was being written, rather than re-generating the byte stream for each of them or waiting for a complete copy of the stream which could be stored and then re-used.
 
 ```go
+package main
+
 import(
 	"io"
 	"log"
