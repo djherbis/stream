@@ -69,7 +69,7 @@ func (s *Stream) Remove() error {
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
 // see a complete and independent view of the stream, and can Read will the stream
 // is written to.
-func (s *Stream) NextReader() (*Reader, error) {
+func (s *Stream) NextReader() (Reader, error) {
 	s.inc()
 
 	select {
@@ -85,7 +85,7 @@ func (s *Stream) NextReader() (*Reader, error) {
 		return nil, err
 	}
 
-	return &Reader{file: file, s: s}, nil
+	return &StreamReader{file: file, s: s}, nil
 }
 
 func (s *Stream) inc() { s.grp.Add(1) }
