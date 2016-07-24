@@ -166,8 +166,9 @@ func testFile(f *Stream, t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		f.Write(testdata)
+		f.Write(testdata[:10])
 		<-time.After(10 * time.Millisecond)
+		f.Write(testdata[10:])
 	}
 
 	f.Close()
