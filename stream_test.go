@@ -116,6 +116,28 @@ func TestMem(t *testing.T) {
 	testFile(f, t)
 }
 
+func TestReadAtWait(t *testing.T) {
+	f, err := NewStream("test.txt", NewMemFS())
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	r, err := f.NextReader()
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	go func() {
+		<-time.After(10 * time.Millisecond)
+		f.Close()
+	}()
+	data := make([]byte, 10)
+	n, err := r.ReadAt(data, 0)
+	if n != 0 || err != io.EOF {
+		t.Errorf("Unexpected, should be empty: %d, %s", n, err)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	f, err := NewStream("test.txt", NewMemFS())
 	if err != nil {

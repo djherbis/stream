@@ -1,11 +1,16 @@
 package stream
 
-import "io"
+import (
+	"io"
+	"sync"
+)
 
 // Reader is a concurrent-safe Stream Reader.
 type Reader struct {
-	s    *Stream
-	file File
+	s       *Stream
+	file    File
+	mu      sync.Mutex
+	readOff int64
 }
 
 // Name returns the name of the underlying File in the FileSystem.
@@ -15,28 +20,22 @@ func (r *Reader) Name() string { return r.file.Name() }
 // ReadAt blocks while waiting for the requested section of the Stream to be written,
 // unless the Stream is closed in which case it will always return immediately.
 func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
-	r.s.b.RLock()
-	defer r.s.b.RUnlock()
-
 	var m int
 
 	for {
 
-		m, err = r.file.ReadAt(p[n:], off+int64(n))
+		m, err = r.file.ReadAt(p[n:], off)
 		n += m
+		off += int64(m)
 
-		if r.s.b.IsOpen() {
-
-			switch {
-			case n != 0 && err == nil:
-				return n, err
-			case err == io.EOF:
-				r.s.b.Wait()
-			case err != nil:
-				return n, err
+		switch {
+		case n != 0 && err == nil:
+			return n, err
+		case err == io.EOF:
+			if v, open := r.s.b.Wait(off); v == 0 && !open {
+				return n, io.EOF
 			}
-
-		} else {
+		case err != nil:
 			return n, err
 		}
 
@@ -46,31 +45,25 @@ func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
 // Read reads from the Stream. If the end of an open Stream is reached, Read
 // blocks until more data is written or the Stream is Closed.
 func (r *Reader) Read(p []byte) (n int, err error) {
-	r.s.b.RLock()
-	defer r.s.b.RUnlock()
-
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var m int
 
 	for {
-
 		m, err = r.file.Read(p[n:])
 		n += m
+		r.readOff += int64(m)
 
-		if r.s.b.IsOpen() {
-
-			switch {
-			case n != 0 && err == nil:
-				return n, err
-			case err == io.EOF:
-				r.s.b.Wait()
-			case err != nil:
-				return n, err
+		switch {
+		case n != 0 && err == nil:
+			return n, nil
+		case err == io.EOF:
+			if v, open := r.s.b.Wait(r.readOff); v == 0 && !open {
+				return n, io.EOF
 			}
-
-		} else {
+		case err != nil:
 			return n, err
 		}
-
 	}
 }
 

@@ -11,6 +11,7 @@ var ErrRemoving = errors.New("cannot open a new reader while removing file")
 
 // Stream is used to concurrently Write and Read from a File.
 type Stream struct {
+	mu       sync.Mutex
 	grp      sync.WaitGroup
 	b        *broadcaster
 	file     File
@@ -41,20 +42,22 @@ func (s *Stream) Name() string { return s.file.Name() }
 
 // Write writes p to the Stream. It's concurrent safe to be called with Stream's other methods.
 func (s *Stream) Write(p []byte) (int, error) {
-	defer s.b.Broadcast()
-	s.b.Lock()
-	defer s.b.Unlock()
-	return s.file.Write(p)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.file.Write(p)
+	s.b.Wrote(n)
+	return n, err
 }
 
 // Close will close the active stream. This will cause Readers to return EOF once they have
 // read the entire stream.
 func (s *Stream) Close() error {
-	defer s.dec()
-	defer s.b.Close()
-	s.b.Lock()
-	defer s.b.Unlock()
-	return s.file.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.file.Close()
+	s.b.Close()
+	s.dec()
+	return err
 }
 
 // Remove will block until the Stream and all its Readers have been Closed,
