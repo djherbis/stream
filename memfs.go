@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrNotFoundInMem is returned when an in-memory FileSystem cannot find a file.
@@ -30,6 +31,7 @@ func (fs *memfs) Create(key string) (File, error) {
 		name: key,
 		r:    bytes.NewBuffer(nil),
 	}
+	file.buf.Store([]byte(nil))
 	file.memReader.memFile = file
 	fs.files[key] = file
 	return file, nil
@@ -53,9 +55,10 @@ func (fs *memfs) Remove(key string) error {
 }
 
 type memFile struct {
-	mu   sync.RWMutex
+	mu   sync.Mutex
 	name string
 	r    *bytes.Buffer
+	buf  atomic.Value
 	memReader
 }
 
@@ -66,16 +69,16 @@ func (f *memFile) Name() string {
 func (f *memFile) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		return f.r.Write(p)
+		n, err := f.r.Write(p)
+		f.buf.Store(f.r.Bytes())
+		f.mu.Unlock()
+		return n, err
 	}
 	return len(p), nil
 }
 
 func (f *memFile) Bytes() []byte {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.r.Bytes()
+	return f.buf.Load().([]byte)
 }
 
 func (f *memFile) Close() error {
