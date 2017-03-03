@@ -44,6 +44,13 @@ func TestMemFs(t *testing.T) {
 	}
 }
 
+func TestSingletonFs(t *testing.T) {
+	var fs singletonFs
+	if _, err := fs.Create(""); err == nil {
+		t.Errorf("expected unsupported, got %s", err)
+	}
+}
+
 func TestBadFile(t *testing.T) {
 	fs := badFs{readers: make([]File, 0, 1)}
 	fs.readers = append(fs.readers, badFile{name: "test"})
@@ -114,6 +121,10 @@ func TestMem(t *testing.T) {
 	}
 	f.Write(nil)
 	testFile(f, t)
+}
+
+func TestMemStreams(t *testing.T) {
+	testFile(NewMemStream(), t)
 }
 
 func TestReadAtWait(t *testing.T) {

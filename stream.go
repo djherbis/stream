@@ -37,6 +37,31 @@ func NewStream(name string, fs FileSystem) (*Stream, error) {
 	return sf, err
 }
 
+// NewMemStream creates an in-memory stream with no name, and no underlying fs.
+// This should replace uses of NewStream("name", NewMemFs()).
+// Remove() is unsupported as there is no fs to remove it from.
+func NewMemStream() *Stream {
+	f := newMemFile("")
+	s := &Stream{
+		file:     f,
+		fs:       singletonFs{f},
+		b:        newBroadcaster(),
+		removing: make(chan struct{}),
+	}
+	s.inc()
+	return s
+}
+
+type singletonFs struct {
+	file *memFile
+}
+
+func (fs singletonFs) Create(key string) (File, error) { return nil, errors.New("unsupported") }
+
+func (fs singletonFs) Open(key string) (File, error) { return &memReader{memFile: fs.file}, nil }
+
+func (fs singletonFs) Remove(key string) error { return errors.New("unsupported") }
+
 // Name returns the name of the underlying File in the FileSystem.
 func (s *Stream) Name() string { return s.file.Name() }
 
