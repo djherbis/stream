@@ -198,4 +198,11 @@ func testReader(f *Stream, t *testing.T) {
 		t.Errorf("unequal %s", buf.Bytes())
 		return
 	}
+	l, closed := r.Size()
+	if !closed {
+		t.Errorf("expected writer to be closed, but was open")
+	}
+	if l != int64(len(testdata)*10) {
+		t.Errorf("expected size to be %d but got %d", len(testdata)*10, l)
+	}
 }

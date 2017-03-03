@@ -43,3 +43,11 @@ func (b *broadcaster) Close() error {
 	b.cond.Broadcast()
 	return nil
 }
+
+func (b *broadcaster) Size() (s int64, c bool) {
+	b.mu.RLock()
+	s = b.size
+	c = b.closed
+	b.mu.RUnlock()
+	return s, c
+}

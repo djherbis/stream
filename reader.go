@@ -73,3 +73,10 @@ func (r *Reader) Close() error {
 	defer r.s.dec()
 	return r.file.Close()
 }
+
+// Size returns the current size of this stream, and true if the
+// the stream writer has been closed. If closed, the size will no longer change.
+// Can be safely called concurrently with all other methods.
+func (r *Reader) Size() (int64, bool) {
+	return r.s.b.Size()
+}
