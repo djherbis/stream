@@ -95,7 +95,7 @@ func (s *Stream) Remove() error {
 }
 
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
-// see a complete and independent view of the stream, and can Read will the stream
+// see a complete and independent view of the stream, and can Read while the stream
 // is written to.
 func (s *Stream) NextReader() (*Reader, error) {
 	s.inc()
