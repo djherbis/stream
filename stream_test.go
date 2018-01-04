@@ -3,8 +3,11 @@ package stream
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -123,6 +126,111 @@ func TestMem(t *testing.T) {
 	testFile(f, t)
 }
 
+func TestCancelBeforeClose(t *testing.T) {
+	f, err := New("test.txt")
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("Hello"))
+	r, _ := f.NextReader()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		bs, err := ioutil.ReadAll(r)
+		if err != ErrCanceled {
+			t.Error("Read after cancel should return an error")
+		}
+		if string(bs) != "Hello" {
+			t.Error("Reader should read as much as it can")
+		}
+		wg.Done()
+	}()
+	// When canceling writer, reader is closed, so writer unblocks and test passes
+	f.Cancel()
+	n, err := f.Write([]byte("world"))
+	// Writer is closed as well
+	if err != ErrWriteAfterClosing {
+		t.Error("expected write after canceling to return ErrWriteAfterClosing")
+	}
+	if n != 0 {
+		t.Error("expected write after canceling to not write anything")
+	}
+	wg.Wait()
+}
+
+func TestCancelAfterClose(t *testing.T) {
+	f, err := New("test.txt")
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("Hello"))
+	r, _ := f.NextReader()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		bs, err := ioutil.ReadAll(r)
+		if err != nil {
+			t.Error("Read after canceling (if after close) should succeed")
+		}
+		if string(bs) != "Hello" {
+			t.Error("Reader should read as much as it can")
+		}
+		wg.Done()
+	}()
+	f.Close()
+	// When canceling writer, reader is unblocked, so writer unblocks and test passes
+	f.Cancel()
+
+	wg.Wait()
+}
+
+func TestCancelReader(t *testing.T) {
+	f, err := New("test.txt")
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("Hello"))
+	r, _ := f.NextReader()
+	r2, _ := f.NextReader()
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		bs, err := ioutil.ReadAll(r)
+		if err != ErrCanceled {
+			t.Error("Read after cancel should return an error")
+		}
+		if string(bs) != "Hello" {
+			t.Error("Reader should read as much as it can")
+		}
+		wg.Done()
+	}()
+	go func() {
+		bs, err := ioutil.ReadAll(r2)
+		if err != nil {
+			t.Error("Non-canceled reader should read everyting without error")
+		}
+		if string(bs) != "Hello world" {
+			t.Error("Non-canceled reader should read everyting, even written after cancel")
+		}
+		wg.Done()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	// When canceling reader, reading is unblocked, so test passes
+	r.Cancel()
+
+	_, err = f.Write([]byte(" world"))
+	if err != nil {
+		t.Error("Expected write after canceling reader to pass")
+	}
+
+	f.Close()
+
+	wg.Wait()
+}
+
 func TestMemStreams(t *testing.T) {
 	testFile(NewMemStream(), t)
 }
@@ -155,19 +263,50 @@ func TestRemove(t *testing.T) {
 		t.Error(err)
 		t.FailNow()
 	}
-	defer f.Close()
+	r, err := f.NextReader()
+	if err != nil {
+		t.Error("should return valid reader before remove")
+	}
+	fmt.Fprintf(f, "Hello")
 	go f.Remove()
 	<-time.After(100 * time.Millisecond)
-	r, err := f.NextReader()
+	waitForReadToFinish := make(chan struct{}, 1)
+	go func() {
+		b, err := ioutil.ReadAll(r)
+		r.Close()
+		if err != nil {
+			t.Errorf("reader should continue as if nothing happens after remove, got: %s", err.Error())
+		}
+		if string(b) != "Hello World" {
+			t.Errorf("reader should read all written data aven after remove, got: %s", string(b))
+		}
+		waitForReadToFinish <- struct{}{}
+	}()
+	r2, err := f.NextReader()
 	switch err {
 	case ErrRemoving:
 	case nil:
 		t.Error("expected error on NextReader()")
-		r.Close()
+		r2.Close()
 	default:
 		t.Error("expected diff error on NextReader()", err)
 	}
 
+	// It should still succeed as we didn't closed stream yet what causes a remove
+	fmt.Fprintf(f, " World")
+
+	f.Close()
+
+	n, err := fmt.Fprintf(f, " War")
+
+	if err != ErrWriteAfterClosing {
+		t.Errorf("Write to stream after closing should fail, has: %v", err)
+	}
+
+	if n != 0 {
+		t.Error("expected write after closing to not write anything")
+	}
+	<-waitForReadToFinish
 }
 
 func testFile(f *Stream, t *testing.T) {
