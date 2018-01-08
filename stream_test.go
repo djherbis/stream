@@ -150,6 +150,9 @@ func TestCloseUnblocksBlockingRead(t *testing.T) {
 		t.FailNow()
 	}
 	r, err := f.NextReader()
+	if err != nil {
+		t.Error(err)
+	}
 	go func() {
 		_, err := ioutil.ReadAll(r)
 		if err == nil || err == io.EOF {
@@ -338,7 +341,7 @@ func testFile(f *Stream, t *testing.T) {
 	}
 
 	if err := f.Close(); err != nil {
-		t.Error("expected succesful close, got ", err)
+		t.Error("expected successful close, got ", err)
 	}
 	testReader(f, t)
 	cleanup(f, t)
