@@ -234,7 +234,7 @@ func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
 	go func() {
 		_, err := ioutil.ReadAll(r)
 		if err == nil || err == io.EOF {
-			t.Error("expected an error on a blocking Read for a closed Reader")
+			t.Error("expeceted an error on a blocking Read for a closed Reader")
 		}
 	}()
 	<-time.After(50 * time.Millisecond) // wait for blocking read
@@ -371,30 +371,31 @@ func testShutdownAfterClose(t *testing.T, fs FileSystem) {
 
 	wg := sync.WaitGroup{}
 
-	wg.Add(2)
+	wg.Add(3)
+	er := errors.New("shutdown")
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_, err := ioutil.ReadAll(r)
-		if err != nil {
-			t.Error("Shutdown should allow for any already created readers to finish reading")
-		}
-		r.Close()
+		f.Write([]byte("Hello"))
+		f.Close()
+		f.ShutdownWithErr(er)
 		wg.Done()
 	}()
-
-	f.Write([]byte("Hello"))
-	f.Close()
-
-	// This waits for any reads to finish, but prevents new reads as well
-	er := errors.New("shutdown")
-	f.ShutdownWithErr(er)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		_, err := f.NextReader()
 		if err != er {
 			t.Error("Opening new reader after canceling should fail")
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		defer r.Close()
+		_, err := ioutil.ReadAll(r)
+		if err != nil {
+			t.Error("Shutdown should allow for any already created readers to finish reading")
 		}
 		wg.Done()
 	}()
