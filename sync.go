@@ -19,6 +19,7 @@ const (
 	openState streamState = iota
 	closedState
 	canceledState
+	shutdownState
 )
 
 type broadcaster struct {
@@ -35,7 +36,6 @@ func newBroadcaster() *broadcaster {
 	var b broadcaster
 	b.cond = sync.NewCond(b.mu.RLocker())
 	b.rs = newReaderSet()
-	b.addHandle()
 	return &b
 }
 
@@ -52,7 +52,7 @@ func (b *broadcaster) Wait(r *Reader, off int64) error {
 	case canceledState:
 		return ErrCanceled
 
-	case closedState:
+	case closedState, shutdownState:
 		remaining := b.size - off
 		if remaining == 0 {
 			return io.EOF
@@ -75,18 +75,28 @@ func (b *broadcaster) Wrote(n int) {
 	}
 }
 
-func (b *broadcaster) Close() (err error) {
+func (b *broadcaster) Shutdown() (err error) {
 	b.mu.Lock()
-	err = b.setState(closedState)
+	b.setState(shutdownState)
 	b.mu.Unlock()
 
-	b.dropHandle()
-	return err
+	b.WaitForZeroReaderHandlers()
+
+	return nil
+}
+
+func (b *broadcaster) Close() (err error) {
+	b.mu.Lock()
+	b.setState(closedState)
+	b.mu.Unlock()
+
+	return nil
 }
 
 func (b *broadcaster) Cancel() (err error) {
 	b.mu.Lock()
-	err = b.setState(canceledState)
+	// Effectively has the same behavior as PreventNewHandles
+	b.setState(canceledState)
 	readersToClose := b.rs.dropAll()
 	b.mu.Unlock()
 
@@ -94,8 +104,7 @@ func (b *broadcaster) Cancel() (err error) {
 		r.Close()
 	}
 
-	// we call Close() after this inside Stream.Cancel(), all blocking Reads will see this.
-	return err
+	return nil
 }
 
 func (b *broadcaster) PreventNewHandles(err error) {
@@ -113,6 +122,7 @@ func (b *broadcaster) WaitForZeroHandles() {
 func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 	b.mu.RLock()
 	switch b.state {
+	// Note we ignore canceledAfterClose state, we want all readers to finish reading after close
 	case canceledState:
 		b.mu.RUnlock()
 		return 0, ErrCanceled
@@ -125,16 +135,14 @@ func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 	return do()
 }
 
-func (b *broadcaster) setState(s streamState) error {
+func (b *broadcaster) setState(s streamState) {
 	switch b.state {
 	case canceledState:
-		b.newHandleErr = ErrCanceled
 
 	default:
 		b.state = s
 		b.cond.Broadcast()
 	}
-	return nil
 }
 
 func (b *broadcaster) Size() (size int64, isClosed bool) {

@@ -104,6 +104,14 @@ func (s *Stream) Cancel() error {
 	return s.Close() // all writes are stopped
 }
 
+// Shutdown signals that this Stream is not accepting more readers and wait for existing ones to close
+// NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.
+// This call is non-blocking, and Remove() after this call is non-blocking.
+func (s *Stream) Shutdown() error {
+	s.b.Shutdown()   // all existing reads are canceled, no new reads will occur, block until all reads are closed
+	return s.Close() // all writes are stopped
+}
+
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
 // see a complete and independent view of the stream, and can Read while the stream
 // is written to.
