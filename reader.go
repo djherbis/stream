@@ -1,25 +1,17 @@
 package stream
 
 import (
-	"errors"
 	"io"
 	"sync"
 )
 
-// ErrRemoving is returned when reading a Reader on a Stream which is being Removed.
-var ErrCanceled = errors.New("reader has been canceled")
-
 // Reader is a concurrent-safe Stream Reader.
 type Reader struct {
-	id       int64
-	s        *Stream
-	file     File
-	mu       sync.Mutex
-	readOff  int64
-	close    bool
-	cancel   bool
-	closing  bool
-	closeErr error
+	s         *Stream
+	file      File
+	mu        sync.Mutex
+	readOff   int64
+	closeOnce onceWithErr
 }
 
 // Name returns the name of the underlying File in the FileSystem.
@@ -29,43 +21,9 @@ func (r *Reader) Name() string { return r.file.Name() }
 // ReadAt blocks while waiting for the requested section of the Stream to be written,
 // unless the Stream is closed in which case it will always return immediately.
 func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	var m int
-
-	for {
-		if r.cancel {
-			return 0, ErrCanceled
-		}
-
-		if r.closing {
-			return 0, nil
-		}
-
-		m, err = r.file.ReadAt(p[n:], off)
-		n += m
-		off += int64(m)
-
-		switch {
-		case n != 0 && err == nil:
-			return n, err
-		case err == io.EOF:
-			if v, open, canceled := r.s.b.Wait(off, r.id); v == 0 {
-				if canceled || r.cancel {
-					r.cancel = true
-					r.closeUnsafe()
-					return 0, ErrCanceled
-				} else if !open || r.close {
-					r.closeUnsafe()
-					return n, io.EOF
-				}
-			}
-		case err != nil:
-			return n, err
-		}
-
-	}
+	return r.read(p, func(p []byte) (int, error) {
+		return r.file.ReadAt(p, off)
+	}, &off)
 }
 
 // Read reads from the Stream. If the end of an open Stream is reached, Read
@@ -74,75 +32,55 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var m int
+	return r.read(p, r.file.Read, &r.readOff)
+}
 
+type readerFunc func([]byte) (int, error)
+
+func (r *Reader) read(p []byte, readFunc readerFunc, off *int64) (n int, err error) {
 	for {
-		if r.cancel {
-			return 0, ErrCanceled
-		}
-
-		if r.closing {
-			return 0, io.EOF
-		}
-
-		m, err = r.file.Read(p[n:])
+		var m int
+		m, err = r.s.b.UseHandle(func() (int, error) {
+			return readFunc(p[n:])
+		})
 		n += m
-		r.readOff += int64(m)
+		*off += int64(m)
 
 		switch {
 		case n != 0 && err == nil:
 			return n, nil
+
 		case err == io.EOF:
-			if v, open, canceled := r.s.b.Wait(r.readOff, r.id); v == 0 {
-				if canceled || r.cancel {
-					r.cancel = true
-					r.closeUnsafe()
-					return 0, ErrCanceled
-				} else if !open || r.close {
-					r.closeUnsafe()
-					return n, io.EOF
-				}
+			if err := r.s.b.Wait(r, *off); err != nil {
+				return n, r.checkErr(err)
 			}
+
 		case err != nil:
-			return n, err
+			return n, r.checkErr(err)
 		}
 	}
+}
+
+func (r *Reader) checkErr(err error) error {
+	switch err {
+	case ErrCanceled:
+		r.Close()
+	}
+	return err
 }
 
 // Close closes this Reader on the Stream. This must be called when done with the
 // Reader or else the Stream cannot be Removed.
 func (r *Reader) Close() error {
-	r.close = true
-	r.s.b.Unblock(r.id)
-	r.mu.Lock()
-	r.mu.Unlock()
-	return r.closeUnsafe()
-}
-
-// Cancel closes this Reader on the Stream and fails next reads from reader.
-// It immediately cancels all pending reads
-func (r *Reader) Cancel() error {
-	r.cancel = true
-	r.s.b.Unblock(r.id)
-	r.mu.Lock()
-	r.mu.Unlock()
-	return r.closeUnsafe()
-}
-
-// This should be called inside r.mu.Lock()
-func (r *Reader) closeUnsafe() error {
-	if r.closing {
-		return r.closeErr
-	}
-	r.closing = true
-	defer r.s.dec()
-	r.closeErr = r.file.Close()
-	r.s.b.Closed(r.id)
-	return r.closeErr
+	return r.closeOnce.Do(func() (err error) {
+		err = r.file.Close()
+		r.s.b.DropReader(r)
+		return err
+	})
 }
 
 // Size returns the current size of the entire stream (not the remaining bytes to be read),
-// and true iff the the stream writer has been closed. If closed, the size will no longer change.
+// and true iff the size is valid (not canceled), and final (won't change).
 // Can be safely called concurrently with all other methods.
 func (r *Reader) Size() (int64, bool) {
 	return r.s.b.Size()
