@@ -159,10 +159,12 @@ func TestCloseUnblocksBlockingRead(t *testing.T) {
 			t.Error("exected an error on a blocking Read for a closed Reader")
 		}
 	}()
-	time.AfterFunc(100*time.Millisecond, func() {
-		r.Close()
-		f.Close()
-	})
+	<-time.After(100 * time.Millisecond) // wait for blocking read
+	r.Close()
+
+	<-time.After(100 * time.Millisecond) // wait until read has been unblocked
+	f.Close()
+
 	cleanup(f, t) // this will deadlock if any arn't Closed
 }
 
