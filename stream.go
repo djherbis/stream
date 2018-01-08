@@ -6,17 +6,16 @@ import (
 	"sync"
 )
 
-// ErrRemoving is returned when requesting a Reader on a Stream which is being Removed.
-var ErrRemoving = errors.New("cannot open a new reader while removing file")
+// ErrUnsupported is returned when an operation is not supported.
+var ErrUnsupported = errors.New("unsupported")
 
 // Stream is used to concurrently Write and Read from a File.
 type Stream struct {
-	mu       sync.Mutex
-	grp      sync.WaitGroup
-	b        *broadcaster
-	file     File
-	fs       FileSystem
-	removing chan struct{}
+	mu        sync.Mutex
+	b         *broadcaster
+	file      File
+	fs        FileSystem
+	closeOnce onceWithErr
 }
 
 // New creates a new Stream from the StdFileSystem with Name "name".
@@ -27,14 +26,7 @@ func New(name string) (*Stream, error) {
 // NewStream creates a new Stream with Name "name" in FileSystem fs.
 func NewStream(name string, fs FileSystem) (*Stream, error) {
 	f, err := fs.Create(name)
-	sf := &Stream{
-		file:     f,
-		fs:       fs,
-		b:        newBroadcaster(),
-		removing: make(chan struct{}),
-	}
-	sf.inc()
-	return sf, err
+	return newStream(f, fs), err
 }
 
 // NewMemStream creates an in-memory stream with no name, and no underlying fs.
@@ -42,25 +34,26 @@ func NewStream(name string, fs FileSystem) (*Stream, error) {
 // Remove() is unsupported as there is no fs to remove it from.
 func NewMemStream() *Stream {
 	f := newMemFile("")
-	s := &Stream{
-		file:     f,
-		fs:       singletonFs{f},
-		b:        newBroadcaster(),
-		removing: make(chan struct{}),
+	return newStream(f, singletonFs{f})
+}
+
+func newStream(file File, fs FileSystem) *Stream {
+	return &Stream{
+		file: file,
+		fs:   fs,
+		b:    newBroadcaster(),
 	}
-	s.inc()
-	return s
 }
 
 type singletonFs struct {
 	file *memFile
 }
 
-func (fs singletonFs) Create(key string) (File, error) { return nil, errors.New("unsupported") }
+func (fs singletonFs) Create(key string) (File, error) { return nil, ErrUnsupported }
 
 func (fs singletonFs) Open(key string) (File, error) { return &memReader{memFile: fs.file}, nil }
 
-func (fs singletonFs) Remove(key string) error { return errors.New("unsupported") }
+func (fs singletonFs) Remove(key string) error { return ErrUnsupported }
 
 // Name returns the name of the underlying File in the FileSystem.
 func (s *Stream) Name() string { return s.file.Name() }
@@ -79,42 +72,38 @@ func (s *Stream) Write(p []byte) (int, error) {
 func (s *Stream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.file.Close()
-	s.b.Close()
-	s.dec()
-	return err
+	return s.closeOnce.Do(func() (err error) {
+		err = s.file.Close()
+		s.b.Close()
+		return err
+	})
 }
 
 // Remove will block until the Stream and all its Readers have been Closed,
 // at which point it will delete the underlying file. NextReader() will return
 // ErrRemoving if called after Remove.
 func (s *Stream) Remove() error {
-	close(s.removing)
-	s.grp.Wait()
+	s.b.PreventNewHandles()  // no new readers can be created, but existing ones can finish, same with the writer
+	s.b.WaitForZeroHandles() // wait for exiting handles to finish up
 	return s.fs.Remove(s.file.Name())
+}
+
+// Cancel signals that this Stream is forcibly ending, NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.
+// This call is non-blocking, and Remove() after this call is non-blocking.
+func (s *Stream) Cancel() error {
+	s.b.Cancel()     // all existing reads are canceled, no new reads will occur, all readers closed
+	return s.Close() // all writes are stopped
 }
 
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
 // see a complete and independent view of the stream, and can Read while the stream
 // is written to.
 func (s *Stream) NextReader() (*Reader, error) {
-	s.inc()
-
-	select {
-	case <-s.removing:
-		s.dec()
-		return nil, ErrRemoving
-	default:
-	}
-
-	file, err := s.fs.Open(s.file.Name())
-	if err != nil {
-		s.dec()
-		return nil, err
-	}
-
-	return &Reader{file: file, s: s}, nil
+	return s.b.NewReader(func() (*Reader, error) {
+		file, err := s.fs.Open(s.file.Name())
+		if err != nil {
+			return nil, err
+		}
+		return &Reader{file: file, s: s}, nil
+	})
 }
-
-func (s *Stream) inc() { s.grp.Add(1) }
-func (s *Stream) dec() { s.grp.Done() }

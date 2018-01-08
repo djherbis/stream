@@ -11,6 +11,9 @@ import (
 // ErrNotFoundInMem is returned when an in-memory FileSystem cannot find a file.
 var ErrNotFoundInMem = errors.New("not found")
 
+// ErrClosedInMem is returned when an operation is performed on a in-memry File that  has been Closed.
+var ErrClosedInMem = errors.New("in-memory file is closed")
+
 type memfs struct {
 	mu    sync.RWMutex
 	files map[string]*memFile
@@ -59,10 +62,11 @@ func (fs *memfs) Remove(key string) error {
 }
 
 type memFile struct {
-	mu   sync.Mutex
-	name string
-	r    *bytes.Buffer
-	buf  atomic.Value
+	mu           sync.Mutex
+	name         string
+	r            *bytes.Buffer
+	buf          atomic.Value
+	writerClosed int32
 	memReader
 }
 
@@ -71,6 +75,10 @@ func (f *memFile) Name() string {
 }
 
 func (f *memFile) Write(p []byte) (int, error) {
+	if atomic.LoadInt32(&f.writerClosed) == 1 {
+		return 0, ErrClosedInMem
+	}
+
 	if len(p) > 0 {
 		f.mu.Lock()
 		n, err := f.r.Write(p)
@@ -86,15 +94,21 @@ func (f *memFile) Bytes() []byte {
 }
 
 func (f *memFile) Close() error {
+	atomic.SwapInt32(&f.writerClosed, 1)
 	return nil
 }
 
 type memReader struct {
 	*memFile
-	n int
+	n            int
+	readerClosed int32
 }
 
 func (r *memReader) ReadAt(p []byte, off int64) (n int, err error) {
+	if atomic.LoadInt32(&r.readerClosed) == 1 {
+		return 0, ErrClosedInMem
+	}
+
 	data := r.Bytes()
 	if int64(len(data)) < off {
 		return 0, io.EOF
@@ -104,11 +118,16 @@ func (r *memReader) ReadAt(p []byte, off int64) (n int, err error) {
 }
 
 func (r *memReader) Read(p []byte) (n int, err error) {
+	if atomic.LoadInt32(&r.readerClosed) == 1 {
+		return 0, ErrClosedInMem
+	}
+
 	n, err = bytes.NewReader(r.Bytes()[r.n:]).Read(p)
 	r.n += n
 	return n, err
 }
 
 func (r *memReader) Close() error {
+	atomic.SwapInt32(&r.readerClosed, 1)
 	return nil
 }
