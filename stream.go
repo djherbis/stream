@@ -108,8 +108,12 @@ func (s *Stream) Cancel() error {
 // NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.
 // This call is non-blocking, and Remove() after this call is non-blocking.
 func (s *Stream) Shutdown() error {
-	s.b.Shutdown()   // all existing reads are canceled, no new reads will occur, block until all reads are closed
-	return s.Close() // all writes are stopped
+	err := s.Close()
+	if err != nil {
+		return err
+	}
+	s.b.Shutdown() // all existing reads are canceled, no new reads will occur, block until all reads are closed
+	return nil
 }
 
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
