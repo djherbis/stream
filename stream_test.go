@@ -48,24 +48,24 @@ type slowFile struct {
 
 func (r slowFile) Name() string { return r.file.Name() }
 func (r slowFile) Read(p []byte) (int, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	return r.file.Read(p)
 }
 func (r slowFile) ReadAt(p []byte, off int64) (int, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	return r.file.ReadAt(p, off)
 }
 func (r slowFile) Write(p []byte) (int, error) {
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	return r.file.Write(p)
 }
 func (r slowFile) Close() error {
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 	return r.file.Close()
 }
 
 func (fs slowFs) Create(name string) (File, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	file, err := fs.fs.Create(name)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (fs slowFs) Create(name string) (File, error) {
 	return &slowFile{file}, nil
 }
 func (fs slowFs) Open(name string) (File, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	file, err := fs.fs.Open(name)
 	if err != nil {
 		return nil, err
@@ -81,7 +81,7 @@ func (fs slowFs) Open(name string) (File, error) {
 	return &slowFile{file}, nil
 }
 func (fs slowFs) Remove(name string) error {
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 	return fs.fs.Remove(name)
 }
 
@@ -237,10 +237,10 @@ func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
 			t.Error("expected an error on a blocking Read for a closed Reader")
 		}
 	}()
-	<-time.After(100 * time.Millisecond) // wait for blocking read
+	<-time.After(50 * time.Millisecond) // wait for blocking read
 	r.Close()
 
-	<-time.After(100 * time.Millisecond) // wait until read has been unblocked
+	<-time.After(50 * time.Millisecond) // wait until read has been unblocked
 	f.Close()
 
 	cleanup(f, t) // this will deadlock if any arn't Closed
@@ -273,7 +273,7 @@ func testCancelBeforeClose(t *testing.T, fs FileSystem) {
 		}
 		wg.Done()
 	}()
-	<-time.After(100 * time.Millisecond) // give Reader time to block, this tests it unblocks
+	<-time.After(50 * time.Millisecond) // give Reader time to block, this tests it unblocks
 
 	// When canceling writer, reader is closed, so writer unblocks and test passes
 	f.Cancel()
@@ -332,7 +332,7 @@ func testCancelAfterClose(t *testing.T, fs FileSystem) {
 	f.Cancel()
 
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		_, err := f.NextReader()
 		if err != ErrCanceled {
 			t.Error("Opening new reader after canceling should fail")
@@ -341,7 +341,7 @@ func testCancelAfterClose(t *testing.T, fs FileSystem) {
 	}()
 
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		_, err := ioutil.ReadAll(r)
 		if err != ErrCanceled {
 			t.Error("If canceling after closing, already opened readers should finish")
@@ -383,7 +383,7 @@ func testShutdownAfterClose(t *testing.T, fs FileSystem) {
 	}()
 
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		_, err := f.NextReader()
 		if err != ErrCanceled {
 			t.Error("Opening new reader after canceling should fail")
@@ -392,7 +392,7 @@ func testShutdownAfterClose(t *testing.T, fs FileSystem) {
 	}()
 
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		_, err := ioutil.ReadAll(r)
 		if err != nil {
 			t.Error("Shutdown should allow for any already created readers to finish reading")
@@ -428,7 +428,7 @@ func testReadAtWait(t *testing.T, fs FileSystem) {
 	}
 	io.WriteString(f, "hello")
 	go func() {
-		<-time.After(100 * time.Millisecond)
+		<-time.After(50 * time.Millisecond)
 		io.WriteString(f, " world")
 		f.Close()
 	}()
@@ -494,7 +494,7 @@ func testRemove(t *testing.T, fs FileSystem) {
 	}
 	fmt.Fprintf(f, "Hello")
 	go cleanup(f, t)
-	<-time.After(100 * time.Millisecond)
+	<-time.After(50 * time.Millisecond)
 	waitForReadToFinish := make(chan struct{})
 	go func() {
 		b, err := ioutil.ReadAll(r)
@@ -542,7 +542,7 @@ func testFile(f *Stream, t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		f.Write(testdata[:10])
-		<-time.After(10 * time.Millisecond)
+		<-time.After(5 * time.Millisecond)
 		f.Write(testdata[10:])
 	}
 
