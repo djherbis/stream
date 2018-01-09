@@ -293,7 +293,7 @@ func TestShutdown(t *testing.T) {
 	f.shutdownWithErr(nil) // noop
 	n, err := r.Read(make([]byte, 1))
 	if err != nil || n != 1 {
-		t.Error("expected successful read, got %s, bytes=%d.", err, n)
+		t.Errorf("expected successful read, got %s, bytes=%d.", err, n)
 	}
 
 	er := errors.New("shutdown")
