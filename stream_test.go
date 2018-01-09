@@ -156,7 +156,7 @@ func TestCloseUnblocksBlockingRead(t *testing.T) {
 	go func() {
 		_, err := ioutil.ReadAll(r)
 		if err == nil || err == io.EOF {
-			t.Error("exected an error on a blocking Read for a closed Reader")
+			t.Error("expected an error on a blocking Read for a closed Reader")
 		}
 	}()
 	<-time.After(100 * time.Millisecond) // wait for blocking read
@@ -276,6 +276,40 @@ func TestReadAtWait(t *testing.T) {
 	if string(data) != "hello world" {
 		t.Error("expected to read 'hello world' got ", string(data))
 	}
+}
+
+func TestShutdown(t *testing.T) {
+	f, err := NewStream(t.Name()+".txt", NewMemFS())
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	r, err := f.NextReader()
+	if err != nil {
+		t.Error("should return valid reader before remove")
+	}
+	io.WriteString(f, "Hello")
+
+	f.shutdownWithErr(nil) // noop
+	n, err := r.Read(make([]byte, 1))
+	if err != nil || n != 1 {
+		t.Error("expected successful read, got %s, bytes=%d.", err, n)
+	}
+
+	er := errors.New("shutdown")
+
+	go func() {
+		_, err := f.NextReader()
+		if err != er {
+			t.Errorf("expected %s, got %s", er, err)
+		}
+
+		f.Close()
+		io.Copy(ioutil.Discard, r)
+		r.Close()
+	}()
+
+	f.shutdownWithErr(er)
 }
 
 func TestRemove(t *testing.T) {

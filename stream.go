@@ -83,9 +83,18 @@ func (s *Stream) Close() error {
 // at which point it will delete the underlying file. NextReader() will return
 // ErrRemoving if called after Remove.
 func (s *Stream) Remove() error {
-	s.b.PreventNewHandles()  // no new readers can be created, but existing ones can finish, same with the writer
-	s.b.WaitForZeroHandles() // wait for exiting handles to finish up
+	s.shutdownWithErr(ErrRemoving)
 	return s.fs.Remove(s.file.Name())
+}
+
+// shutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
+// method also blocks until all Readers and the Writer have closed.
+func (s *Stream) shutdownWithErr(err error) {
+	if err == nil {
+		return
+	}
+	s.b.PreventNewHandles(err) // no new readers can be created, but existing ones can finish, same with the writer
+	s.b.WaitForZeroHandles()   // wait for exiting handles to finish up
 }
 
 // Cancel signals that this Stream is forcibly ending, NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.

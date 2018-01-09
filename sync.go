@@ -3,6 +3,7 @@ package stream
 import (
 	"errors"
 	"io"
+	"os"
 	"sync"
 )
 
@@ -11,8 +12,6 @@ var ErrRemoving = errors.New("cannot open a new reader while removing file")
 
 // ErrCanceled indicates that stream has been canceled.
 var ErrCanceled = errors.New("stream has been canceled")
-
-var errReaderIsClosed = errors.New("closed Reader")
 
 type streamState int
 
@@ -23,13 +22,13 @@ const (
 )
 
 type broadcaster struct {
-	mu       sync.RWMutex
-	cond     *sync.Cond
-	state    streamState
-	size     int64
-	removing bool
-	rs       *readerSet
-	grp      sync.WaitGroup
+	mu           sync.RWMutex
+	cond         *sync.Cond
+	state        streamState
+	size         int64
+	newHandleErr error
+	rs           *readerSet
+	fileInUse    sync.WaitGroup
 }
 
 func newBroadcaster() *broadcaster {
@@ -61,7 +60,7 @@ func (b *broadcaster) Wait(r *Reader, off int64) error {
 	}
 
 	if !b.rs.has(r) {
-		return errReaderIsClosed
+		return os.ErrClosed
 	}
 
 	return nil
@@ -95,17 +94,20 @@ func (b *broadcaster) Cancel() (err error) {
 		r.Close()
 	}
 
+	// we call Close() after this inside Stream.Cancel(), all blocking Reads will see this.
 	return err
 }
 
-func (b *broadcaster) PreventNewHandles() {
+func (b *broadcaster) PreventNewHandles(err error) {
 	b.mu.Lock()
-	b.removing = true
+	if b.newHandleErr == nil {
+		b.newHandleErr = err
+	}
 	b.mu.Unlock()
 }
 
 func (b *broadcaster) WaitForZeroHandles() {
-	b.grp.Wait()
+	b.fileInUse.Wait()
 }
 
 func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
@@ -126,7 +128,7 @@ func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 func (b *broadcaster) setState(s streamState) error {
 	switch b.state {
 	case canceledState:
-		// do nothing
+		b.newHandleErr = ErrCanceled
 
 	default:
 		b.state = s
@@ -146,19 +148,15 @@ func (b *broadcaster) Size() (size int64, isClosed bool) {
 func (b *broadcaster) addHandle() error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if b.state == canceledState {
-		return ErrCanceled
+	if b.newHandleErr != nil {
+		return b.newHandleErr
 	}
 
-	if b.removing {
-		return ErrRemoving
-	}
-
-	b.grp.Add(1)
+	b.fileInUse.Add(1)
 	return nil
 }
 
-func (b *broadcaster) dropHandle() { b.grp.Done() }
+func (b *broadcaster) dropHandle() { b.fileInUse.Done() }
 
 func (b *broadcaster) NewReader(createReader func() (*Reader, error)) (*Reader, error) {
 	if err := b.addHandle(); err != nil {
@@ -181,12 +179,18 @@ func (b *broadcaster) NewReader(createReader func() (*Reader, error)) (*Reader, 
 func (b *broadcaster) DropReader(r *Reader) {
 	b.mu.Lock()
 	b.rs.drop(r)
+	isCanceled := b.state == canceledState
 	b.mu.Unlock()
 
 	b.dropHandle()
 
-	// in case this Reader is blocking, wake all Readers up.
-	// would be better if we could wake up just this reader, but not possible at this time.
+	if isCanceled {
+		// we've canceled, either we've already broadcasted from Stream.Cancel() or will.
+		// if we have => there will be no more blocking reads, no need to broadcast here.
+		// if we haven't yet => we will, so no need to broadcast here.
+		// this avoids a broadcast storm on Cancel() when all readers call Close()
+		return
+	}
 	b.cond.Broadcast()
 }
 

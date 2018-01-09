@@ -9,7 +9,8 @@ import (
 type Reader struct {
 	s         *Stream
 	file      File
-	mu        sync.Mutex
+	fileMu    sync.RWMutex
+	readMu    sync.Mutex
 	readOff   int64
 	closeOnce onceWithErr
 }
@@ -29,8 +30,8 @@ func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
 // Read reads from the Stream. If the end of an open Stream is reached, Read
 // blocks until more data is written or the Stream is Closed.
 func (r *Reader) Read(p []byte) (n int, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.readMu.Lock()
+	defer r.readMu.Unlock()
 
 	return r.read(p, r.file.Read, &r.readOff)
 }
@@ -41,6 +42,8 @@ func (r *Reader) read(p []byte, readFunc readerFunc, off *int64) (n int, err err
 	for {
 		var m int
 		m, err = r.s.b.UseHandle(func() (int, error) {
+			r.fileMu.RLock()
+			defer r.fileMu.RUnlock()
 			return readFunc(p[n:])
 		})
 		n += m
@@ -73,7 +76,9 @@ func (r *Reader) checkErr(err error) error {
 // Reader or else the Stream cannot be Removed.
 func (r *Reader) Close() error {
 	return r.closeOnce.Do(func() (err error) {
+		r.fileMu.Lock()
 		err = r.file.Close()
+		r.fileMu.Unlock()
 		r.s.b.DropReader(r)
 		return err
 	})
