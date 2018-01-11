@@ -83,13 +83,13 @@ func (s *Stream) Close() error {
 // at which point it will delete the underlying file. NextReader() will return
 // ErrRemoving if called after Remove.
 func (s *Stream) Remove() error {
-	s.shutdownWithErr(ErrRemoving)
+	s.ShutdownWithErr(ErrRemoving)
 	return s.fs.Remove(s.file.Name())
 }
 
-// shutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
+// ShutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
 // method also blocks until all Readers and the Writer have closed.
-func (s *Stream) shutdownWithErr(err error) {
+func (s *Stream) ShutdownWithErr(err error) {
 	if err == nil {
 		return
 	}

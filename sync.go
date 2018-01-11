@@ -77,16 +77,17 @@ func (b *broadcaster) Wrote(n int) {
 
 func (b *broadcaster) Close() (err error) {
 	b.mu.Lock()
-	err = b.setState(closedState)
+	b.setState(closedState)
 	b.mu.Unlock()
 
 	b.dropHandle()
-	return err
+	return nil
 }
 
 func (b *broadcaster) Cancel() (err error) {
 	b.mu.Lock()
-	err = b.setState(canceledState)
+	b.setState(canceledState)
+	b.preventNewHandles(ErrCanceled)
 	readersToClose := b.rs.dropAll()
 	b.mu.Unlock()
 
@@ -94,16 +95,19 @@ func (b *broadcaster) Cancel() (err error) {
 		r.Close()
 	}
 
-	// we call Close() after this inside Stream.Cancel(), all blocking Reads will see this.
-	return err
+	return nil
 }
 
 func (b *broadcaster) PreventNewHandles(err error) {
 	b.mu.Lock()
+	b.preventNewHandles(err)
+	b.mu.Unlock()
+}
+
+func (b *broadcaster) preventNewHandles(err error) {
 	if b.newHandleErr == nil {
 		b.newHandleErr = err
 	}
-	b.mu.Unlock()
 }
 
 func (b *broadcaster) WaitForZeroHandles() {
@@ -125,16 +129,14 @@ func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 	return do()
 }
 
-func (b *broadcaster) setState(s streamState) error {
+func (b *broadcaster) setState(s streamState) {
 	switch b.state {
 	case canceledState:
-		b.newHandleErr = ErrCanceled
 
 	default:
 		b.state = s
 		b.cond.Broadcast()
 	}
-	return nil
 }
 
 func (b *broadcaster) Size() (size int64, isClosed bool) {

@@ -39,6 +39,60 @@ func (fs badFs) Open(name string) (File, error) {
 }
 func (fs badFs) Remove(name string) error { return os.Remove(name) }
 
+type slowFs struct {
+	fs FileSystem
+}
+type slowFile struct {
+	file File
+}
+
+func (r slowFile) Name() string { return r.file.Name() }
+func (r slowFile) Read(p []byte) (int, error) {
+	time.Sleep(5 * time.Millisecond)
+	return r.file.Read(p)
+}
+func (r slowFile) ReadAt(p []byte, off int64) (int, error) {
+	time.Sleep(5 * time.Millisecond)
+	return r.file.ReadAt(p, off)
+}
+func (r slowFile) Write(p []byte) (int, error) {
+	time.Sleep(10 * time.Millisecond)
+	return r.file.Write(p)
+}
+func (r slowFile) Close() error {
+	time.Sleep(25 * time.Millisecond)
+	return r.file.Close()
+}
+
+func (fs slowFs) Create(name string) (File, error) {
+	time.Sleep(5 * time.Millisecond)
+	file, err := fs.fs.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	return &slowFile{file}, nil
+}
+func (fs slowFs) Open(name string) (File, error) {
+	time.Sleep(5 * time.Millisecond)
+	file, err := fs.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &slowFile{file}, nil
+}
+func (fs slowFs) Remove(name string) error {
+	time.Sleep(25 * time.Millisecond)
+	return fs.fs.Remove(name)
+}
+
+func GetFilesystems() []FileSystem {
+	return []FileSystem{
+		NewMemFS(),
+		&slowFs{NewMemFS()},
+		StdFileSystem,
+	}
+}
+
 func TestMemFs(t *testing.T) {
 	fs := NewMemFS()
 	if _, err := fs.Open("not found"); err != ErrNotFoundInMem {
@@ -126,25 +180,49 @@ func TestMem(t *testing.T) {
 	testFile(f, t)
 }
 
-func TestCancelClosesAll(t *testing.T) {
-	f, err := New(t.Name() + ".txt")
+// Extra test for slow filesystem
+func TestSlowMem(t *testing.T) {
+	f, err := NewStream(t.Name()+".txt", &slowFs{NewMemFS()})
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
 	}
-	for i := 0; i < 10; i++ {
-		_, err := f.NextReader() // we won't even grab the reader
-		if err != nil {
-			t.Error(err)
-			t.FailNow()
-		}
+	f.Write(nil)
+	testFile(f, t)
+}
+
+func TestCancelClosesAll(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		func() {
+			f, err := NewStream(t.Name()+".txt", fs)
+			if err != nil {
+				t.Error(err)
+				t.FailNow()
+			}
+
+			for i := 0; i < 10; i++ {
+				_, err := f.NextReader() // we won't even grab the reader
+				if err != nil {
+					t.Error(err)
+					t.FailNow()
+				}
+			}
+			f.Cancel() // Closes all the idle Readers
+			// Double cancel should not affect the outcome
+			f.Cancel()
+			cleanup(f, t) // this will deadlock if any arn't Closed
+		}()
 	}
-	f.Cancel()    // Closes all the idle Readers
-	cleanup(f, t) // this will deadlock if any arn't Closed
 }
 
 func TestCloseUnblocksBlockingRead(t *testing.T) {
-	f, err := New(t.Name() + ".txt")
+	for _, fs := range GetFilesystems() {
+		testCloseUnblocksBlockingRead(t, fs)
+	}
+}
+
+func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -159,17 +237,23 @@ func TestCloseUnblocksBlockingRead(t *testing.T) {
 			t.Error("expected an error on a blocking Read for a closed Reader")
 		}
 	}()
-	<-time.After(100 * time.Millisecond) // wait for blocking read
+	<-time.After(50 * time.Millisecond) // wait for blocking read
 	r.Close()
 
-	<-time.After(100 * time.Millisecond) // wait until read has been unblocked
+	<-time.After(50 * time.Millisecond) // wait until read has been unblocked
 	f.Close()
 
 	cleanup(f, t) // this will deadlock if any arn't Closed
 }
 
 func TestCancelBeforeClose(t *testing.T) {
-	f, err := New(t.Name() + ".txt")
+	for _, fs := range GetFilesystems() {
+		testCancelBeforeClose(t, fs)
+	}
+}
+
+func testCancelBeforeClose(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -189,10 +273,14 @@ func TestCancelBeforeClose(t *testing.T) {
 		}
 		wg.Done()
 	}()
-	<-time.After(100 * time.Millisecond) // give Reader time to block, this tests it unblocks
+	<-time.After(50 * time.Millisecond) // give Reader time to block, this tests it unblocks
 
 	// When canceling writer, reader is closed, so writer unblocks and test passes
 	f.Cancel()
+	// Double cancel should not affect the outcome
+	f.Cancel()
+	// Close after cancel should not affect the outcome
+	f.Close()
 
 	// ReadAt after cancel
 	_, err = ioutil.ReadAll(io.NewSectionReader(r, 0, 1))
@@ -219,25 +307,94 @@ func TestCancelBeforeClose(t *testing.T) {
 }
 
 func TestCancelAfterClose(t *testing.T) {
-	f, err := New(t.Name() + ".txt")
+	for _, fs := range GetFilesystems() {
+		testCancelAfterClose(t, fs)
+	}
+}
+
+func testCancelAfterClose(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
 	}
-	f.Write([]byte("Hello"))
-	f.Close()
 
 	r, _ := f.NextReader()
 
-	// When canceling writer, reader is unblocked, so writer unblocks and test passes
+	wg := sync.WaitGroup{}
+
+	wg.Add(2)
+
+	f.Write([]byte("Hello"))
+	f.Close()
+
+	// This unblocks and cancels any future reads
 	f.Cancel()
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
 	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := f.NextReader()
+		if err != ErrCanceled {
+			t.Error("Opening new reader after canceling should fail")
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
 		_, err := ioutil.ReadAll(r)
 		if err != ErrCanceled {
-			t.Error("Read after canceling (even after close) should fail")
+			t.Error("If canceling after closing, already opened readers should finish")
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	cleanup(f, t)
+}
+
+func TestShutdownAfterClose(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testShutdownAfterClose(t, fs)
+	}
+}
+
+func testShutdownAfterClose(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	r, _ := f.NextReader()
+
+	wg := sync.WaitGroup{}
+
+	wg.Add(2)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := ioutil.ReadAll(r)
+		if err != nil {
+			t.Error("Shutdown should allow for any already created readers to finish reading")
+		}
+		r.Close()
+		wg.Done()
+	}()
+
+	f.Write([]byte("Hello"))
+	f.Close()
+
+	// This waits for any reads to finish, but prevents new reads as well
+	er := errors.New("shutdown")
+	f.ShutdownWithErr(er)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := f.NextReader()
+		if err != er {
+			t.Error("Opening new reader after canceling should fail")
 		}
 		wg.Done()
 	}()
@@ -252,7 +409,13 @@ func TestMemStreams(t *testing.T) {
 }
 
 func TestReadAtWait(t *testing.T) {
-	f, err := NewStream(t.Name()+".txt", NewMemFS())
+	for _, fs := range GetFilesystems() {
+		testReadAtWait(t, fs)
+	}
+}
+
+func testReadAtWait(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -264,7 +427,7 @@ func TestReadAtWait(t *testing.T) {
 	}
 	io.WriteString(f, "hello")
 	go func() {
-		<-time.After(100 * time.Millisecond)
+		<-time.After(50 * time.Millisecond)
 		io.WriteString(f, " world")
 		f.Close()
 	}()
@@ -290,7 +453,7 @@ func TestShutdown(t *testing.T) {
 	}
 	io.WriteString(f, "Hello")
 
-	f.shutdownWithErr(nil) // noop
+	f.ShutdownWithErr(nil) // noop
 	n, err := r.Read(make([]byte, 1))
 	if err != nil || n != 1 {
 		t.Errorf("expected successful read, got %s, bytes=%d.", err, n)
@@ -309,11 +472,17 @@ func TestShutdown(t *testing.T) {
 		r.Close()
 	}()
 
-	f.shutdownWithErr(er)
+	f.ShutdownWithErr(er)
 }
 
 func TestRemove(t *testing.T) {
-	f, err := NewStream(t.Name()+".txt", NewMemFS())
+	for _, fs := range GetFilesystems() {
+		testRemove(t, fs)
+	}
+}
+
+func testRemove(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -324,7 +493,7 @@ func TestRemove(t *testing.T) {
 	}
 	fmt.Fprintf(f, "Hello")
 	go cleanup(f, t)
-	<-time.After(100 * time.Millisecond)
+	<-time.After(50 * time.Millisecond)
 	waitForReadToFinish := make(chan struct{})
 	go func() {
 		b, err := ioutil.ReadAll(r)
@@ -372,7 +541,7 @@ func testFile(f *Stream, t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		f.Write(testdata[:10])
-		<-time.After(10 * time.Millisecond)
+		<-time.After(5 * time.Millisecond)
 		f.Write(testdata[10:])
 	}
 
