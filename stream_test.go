@@ -371,31 +371,30 @@ func testShutdownAfterClose(t *testing.T, fs FileSystem) {
 
 	wg := sync.WaitGroup{}
 
-	wg.Add(3)
-
-	go func() {
-		f.Write([]byte("Hello"))
-		f.Close()
-
-		// This waits for any reads to finish, but prevents new reads as well
-		f.Shutdown()
-		wg.Done()
-	}()
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_, err := f.NextReader()
-		if err != ErrCanceled {
-			t.Error("Opening new reader after canceling should fail")
-		}
-		wg.Done()
-	}()
+	wg.Add(2)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		_, err := ioutil.ReadAll(r)
 		if err != nil {
 			t.Error("Shutdown should allow for any already created readers to finish reading")
+		}
+		r.Close()
+		wg.Done()
+	}()
+
+	f.Write([]byte("Hello"))
+	f.Close()
+
+	// This waits for any reads to finish, but prevents new reads as well
+	er := errors.New("shutdown")
+	f.ShutdownWithErr(er)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := f.NextReader()
+		if err != er {
+			t.Error("Opening new reader after canceling should fail")
 		}
 		wg.Done()
 	}()
@@ -454,7 +453,7 @@ func TestShutdown(t *testing.T) {
 	}
 	io.WriteString(f, "Hello")
 
-	f.shutdownWithErr(nil) // noop
+	f.ShutdownWithErr(nil) // noop
 	n, err := r.Read(make([]byte, 1))
 	if err != nil || n != 1 {
 		t.Errorf("expected successful read, got %s, bytes=%d.", err, n)
@@ -473,7 +472,7 @@ func TestShutdown(t *testing.T) {
 		r.Close()
 	}()
 
-	f.shutdownWithErr(er)
+	f.ShutdownWithErr(er)
 }
 
 func TestRemove(t *testing.T) {

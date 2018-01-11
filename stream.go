@@ -83,13 +83,13 @@ func (s *Stream) Close() error {
 // at which point it will delete the underlying file. NextReader() will return
 // ErrRemoving if called after Remove.
 func (s *Stream) Remove() error {
-	s.shutdownWithErr(ErrRemoving)
+	s.ShutdownWithErr(ErrRemoving)
 	return s.fs.Remove(s.file.Name())
 }
 
-// shutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
+// ShutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
 // method also blocks until all Readers and the Writer have closed.
-func (s *Stream) shutdownWithErr(err error) {
+func (s *Stream) ShutdownWithErr(err error) {
 	if err == nil {
 		return
 	}
@@ -102,18 +102,6 @@ func (s *Stream) shutdownWithErr(err error) {
 func (s *Stream) Cancel() error {
 	s.b.Cancel()     // all existing reads are canceled, no new reads will occur, all readers closed
 	return s.Close() // all writes are stopped
-}
-
-// Shutdown signals that this Stream is not accepting more readers and wait for existing ones to close
-// NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.
-// This call is non-blocking, and Remove() after this call is non-blocking.
-func (s *Stream) Shutdown() error {
-	err := s.Close()
-	if err != nil {
-		return err
-	}
-	s.b.Shutdown() // all existing reads are canceled, no new reads will occur, block until all reads are closed
-	return nil
 }
 
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will

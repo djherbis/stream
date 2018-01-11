@@ -66,7 +66,7 @@ func (r *Reader) read(p []byte, readFunc readerFunc, off *int64) (n int, err err
 
 func (r *Reader) checkErr(err error) error {
 	switch err {
-	case ErrCanceled, io.EOF:
+	case ErrCanceled:
 		r.Close()
 	}
 	return err

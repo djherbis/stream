@@ -19,7 +19,6 @@ const (
 	openState streamState = iota
 	closedState
 	canceledState
-	shutdownState
 )
 
 type broadcaster struct {
@@ -36,6 +35,7 @@ func newBroadcaster() *broadcaster {
 	var b broadcaster
 	b.cond = sync.NewCond(b.mu.RLocker())
 	b.rs = newReaderSet()
+	b.addHandle()
 	return &b
 }
 
@@ -52,7 +52,7 @@ func (b *broadcaster) Wait(r *Reader, off int64) error {
 	case canceledState:
 		return ErrCanceled
 
-	case closedState, shutdownState:
+	case closedState:
 		remaining := b.size - off
 		if remaining == 0 {
 			return io.EOF
@@ -75,28 +75,19 @@ func (b *broadcaster) Wrote(n int) {
 	}
 }
 
-func (b *broadcaster) Shutdown() (err error) {
-	b.mu.Lock()
-	b.setState(shutdownState)
-	b.mu.Unlock()
-
-	b.WaitForZeroReaderHandlers()
-
-	return nil
-}
-
 func (b *broadcaster) Close() (err error) {
 	b.mu.Lock()
 	b.setState(closedState)
 	b.mu.Unlock()
 
+	b.dropHandle()
 	return nil
 }
 
 func (b *broadcaster) Cancel() (err error) {
 	b.mu.Lock()
-	// Effectively has the same behavior as PreventNewHandles
 	b.setState(canceledState)
+	b.preventNewHandles(ErrCanceled)
 	readersToClose := b.rs.dropAll()
 	b.mu.Unlock()
 
@@ -109,10 +100,14 @@ func (b *broadcaster) Cancel() (err error) {
 
 func (b *broadcaster) PreventNewHandles(err error) {
 	b.mu.Lock()
+	b.preventNewHandles(err)
+	b.mu.Unlock()
+}
+
+func (b *broadcaster) preventNewHandles(err error) {
 	if b.newHandleErr == nil {
 		b.newHandleErr = err
 	}
-	b.mu.Unlock()
 }
 
 func (b *broadcaster) WaitForZeroHandles() {
@@ -122,7 +117,6 @@ func (b *broadcaster) WaitForZeroHandles() {
 func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 	b.mu.RLock()
 	switch b.state {
-	// Note we ignore canceledAfterClose state, we want all readers to finish reading after close
 	case canceledState:
 		b.mu.RUnlock()
 		return 0, ErrCanceled
