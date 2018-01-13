@@ -234,7 +234,7 @@ func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
 	go func() {
 		_, err := ioutil.ReadAll(r)
 		if err == nil || err == io.EOF {
-			t.Error("expeceted an error on a blocking Read for a closed Reader")
+			t.Error("expected an error on a blocking Read for a closed Reader")
 		}
 	}()
 	<-time.After(50 * time.Millisecond) // wait for blocking read
