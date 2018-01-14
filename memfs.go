@@ -27,15 +27,14 @@ func NewMemFS() FileSystem {
 func (fs *memfs) Create(key string) (File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	file := newMemFile(key)
+	file := newMemFile()
 	fs.files[key] = file
 	return file, nil
 }
 
-func newMemFile(name string) *memFile {
+func newMemFile() *memFile {
 	file := &memFile{
-		name: name,
-		r:    bytes.NewBuffer(nil),
+		r: bytes.NewBuffer(nil),
 	}
 	file.buf.Store([]byte(nil))
 	file.memReader.memFile = file
