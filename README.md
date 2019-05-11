@@ -59,7 +59,7 @@ func main(){
 		close(waitForReader)
 	}()
 
-  // Full copy of the stream!
+        // Full copy of the stream!
 	r, err := w.NextReader() 
 	if err != nil {
 		log.Fatal(err)
