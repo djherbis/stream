@@ -53,8 +53,7 @@ func (b *broadcaster) Wait(r *Reader, off int64) error {
 		return ErrCanceled
 
 	case closedState:
-		remaining := b.size - off
-		if remaining == 0 {
+		if off >= b.size {
 			return io.EOF
 		}
 	}

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"errors"
 	"io"
 	"sync"
 )
@@ -22,9 +23,7 @@ func (r *Reader) Name() string { return r.file.Name() }
 // ReadAt blocks while waiting for the requested section of the Stream to be written,
 // unless the Stream is closed in which case it will always return immediately.
 func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
-	return r.read(p, func(p []byte) (int, error) {
-		return r.file.ReadAt(p, off)
-	}, &off)
+	return r.read(p, &off)
 }
 
 // Read reads from the Stream. If the end of an open Stream is reached, Read
@@ -32,19 +31,16 @@ func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
 func (r *Reader) Read(p []byte) (n int, err error) {
 	r.readMu.Lock()
 	defer r.readMu.Unlock()
-
-	return r.read(p, r.file.Read, &r.readOff)
+	return r.read(p, &r.readOff)
 }
 
-type readerFunc func([]byte) (int, error)
-
-func (r *Reader) read(p []byte, readFunc readerFunc, off *int64) (n int, err error) {
+func (r *Reader) read(p []byte, off *int64) (n int, err error) {
 	for {
 		var m int
 		m, err = r.s.b.UseHandle(func() (int, error) {
 			r.fileMu.RLock()
 			defer r.fileMu.RUnlock()
-			return readFunc(p[n:])
+			return r.file.ReadAt(p[n:], *off)
 		})
 		n += m
 		*off += int64(m)
@@ -90,3 +86,41 @@ func (r *Reader) Close() error {
 func (r *Reader) Size() (int64, bool) {
 	return r.s.b.Size()
 }
+
+// Seek changes the offset of the next Read in the stream.
+// Seeking to Start/Current does not block for the stream to reach that position,
+// so it cannot guarantee that position exists.
+// Seeking to End will block until the stream is closed and then seek to that position.
+// Seek is safe to call concurrently with all other methods, though calling it
+// concurrently with Read will lead to an undefined order of the calls
+// (ex. may Seek then Read or Read than Seek, changing which bytes are Read).
+func (r *Reader) Seek(offset int64, whence int) (int64, error) {
+	r.readMu.Lock()
+	defer r.readMu.Unlock()
+
+	switch whence {
+	default:
+		return 0, errWhence
+	case io.SeekStart:
+	case io.SeekCurrent:
+		offset += r.readOff
+	case io.SeekEnd:
+		if err := r.s.b.Wait(r, maxInt64); err != nil && err != io.EOF {
+			return 0, err
+		}
+		size, _ := r.s.b.Size() // we most be closed to reach here due to ^
+		offset += size
+	}
+	if offset < 0 {
+		return 0, errOffset
+	}
+	r.readOff = offset
+	return r.readOff, nil
+}
+
+var (
+	errWhence = errors.New("Seek: invalid whence")
+	errOffset = errors.New("Seek: invalid offset")
+)
+
+const maxInt64 = 1<<63 - 1

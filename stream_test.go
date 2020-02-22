@@ -99,6 +99,24 @@ func TestMemFs(t *testing.T) {
 		t.Error(err)
 		t.FailNow()
 	}
+
+
+	want := "hello"
+	w, _ := fs.Create("file")
+	io.WriteString(w, want)
+
+	r, _ := fs.Open("file")
+	data, _ := ioutil.ReadAll(r)
+	got := string(data)
+
+	if want != got {
+		t.Errorf("Want/got: %v/%v", want, got)
+	}
+
+	r.Close()
+	if _, err := ioutil.ReadAll(r); err != os.ErrClosed {
+		t.Errorf("wanted ErrClosed got %v", err)
+	}
 }
 
 func TestSingletonFs(t *testing.T) {
@@ -421,11 +439,13 @@ func testReadAtWait(t *testing.T, fs FileSystem) {
 		t.Error(err)
 		t.FailNow()
 	}
+	defer f.Remove()
 	r, err := f.NextReader()
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
 	}
+	defer r.Close()
 	io.WriteString(f, "hello")
 	go func() {
 		<-time.After(50 * time.Millisecond)
@@ -603,5 +623,94 @@ func testReader(f *Stream, t *testing.T) {
 func cleanup(f *Stream, t *testing.T) {
 	if err := f.Remove(); err != nil && err != ErrUnsupported {
 		t.Error("error while removing file: ", err)
+	}
+}
+
+func TestSeeker(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testSeeker(t, fs)
+	}
+}
+
+func testSeeker(t *testing.T, fs FileSystem) {
+	f, err := NewStream(t.Name()+".txt", fs)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	defer f.Remove()
+	output := "012345"
+	go func() {
+		io.WriteString(f, output)
+		<-time.After(5 * time.Millisecond)
+		f.Close()
+	}()
+	r, _ := f.NextReader()
+
+	n := int64(len(output))
+	for i := int64(-1); i >= -n; i-- {
+		off, err := r.Seek(i, io.SeekEnd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := off, n+i; want != got {
+			t.Errorf("Want/got wrong offset: %v, %v", want, got)
+		}
+		data, err := ioutil.ReadAll(io.LimitReader(r, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(data), output[n+i:n+i+1]; want != got {
+			t.Errorf("Want/got wrong: %v, %v", want, got)
+		}
+	}
+
+	for i := int64(0); i < n; i++ {
+		off, err := r.Seek(i, io.SeekStart)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := off, i; want != got {
+			t.Errorf("Want/got wrong offset: %v, %v", want, got)
+		}
+		data, err := ioutil.ReadAll(io.LimitReader(r, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(data), output[i:i+1]; want != got {
+			t.Errorf("Want/got wrong: %v, %v", want, got)
+		}
+	}
+
+	r.Seek(0, io.SeekStart)
+
+	for i := int64(1); i < n; i += 2 {
+		off, err := r.Seek(1, io.SeekCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := off, i; want != got {
+			t.Errorf("Want/got wrong offset: %v, %v", want, got)
+		}
+		data, err := ioutil.ReadAll(io.LimitReader(r, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(data), output[i:i+1]; want != got {
+			t.Errorf("Want/got wrong: %v, %v", want, got)
+		}
+	}
+
+	if _, err := r.Seek(0, 100); err != errWhence {
+		t.Errorf("Expected errWhence")
+	}
+
+	if _, err := r.Seek(-1, io.SeekStart); err != errOffset {
+		t.Errorf("Expected errOffset")
+	}
+
+	f.Cancel()
+	if _, err := r.Seek(0, io.SeekEnd); err != ErrCanceled {
+		t.Fatal(err)
 	}
 }
