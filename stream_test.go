@@ -452,13 +452,14 @@ func testReadAtWait(t *testing.T, fs FileSystem) {
 		io.WriteString(f, " world")
 		f.Close()
 	}()
-	data := make([]byte, 11)
-	_, err = r.ReadAt(data, 0)
+	data := make([]byte, 5)
+	_, err = r.ReadAt(data, 6)
 	if err != nil {
 		t.Error(err)
 	}
-	if string(data) != "hello world" {
-		t.Error("expected to read 'hello world' got ", string(data))
+	want := "world"
+	if string(data) != want {
+		t.Errorf("expected to read %q got %q", want, string(data))
 	}
 }
 
