@@ -46,7 +46,7 @@ func (r *Reader) read(p []byte, off *int64) (n int, err error) {
 		*off += int64(m)
 
 		switch {
-		case n != 0 && err == nil:
+		case n != 0 && (err == nil || err == io.EOF):
 			return n, nil
 
 		case err == io.EOF:
