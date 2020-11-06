@@ -90,10 +90,14 @@ func (r *Reader) Size() (int64, bool) {
 // Seek changes the offset of the next Read in the stream.
 // Seeking to Start/Current does not block for the stream to reach that position,
 // so it cannot guarantee that position exists.
-// Seeking to End will block until the stream is closed and then seek to that position.
+// Seeking to End will block until the stream is closed and then seek to that position,
+// UNLESS Stream.SetSeekEnd has specified the size, in which case Seek End will be relative
+// that that size. Reads will still block if reading from unwritten portions of the stream.
 // Seek is safe to call concurrently with all other methods, though calling it
 // concurrently with Read will lead to an undefined order of the calls
 // (ex. may Seek then Read or Read than Seek, changing which bytes are Read).
+// Similarly, calling SetSeekEnd concurrently with calls to Seek may lead to
+// either SeekEnd blocking OR using the SetSeekEnd.
 func (r *Reader) Seek(offset int64, whence int) (int64, error) {
 	r.readMu.Lock()
 	defer r.readMu.Unlock()
@@ -105,10 +109,10 @@ func (r *Reader) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		offset += r.readOff
 	case io.SeekEnd:
-		if err := r.s.b.Wait(r, maxInt64); err != nil && err != io.EOF {
+		size, err := r.seekEnd()
+		if err != nil {
 			return 0, err
 		}
-		size, _ := r.s.b.Size() // we most be closed to reach here due to ^
 		offset += size
 	}
 	if offset < 0 {
@@ -116,6 +120,20 @@ func (r *Reader) Seek(offset int64, whence int) (int64, error) {
 	}
 	r.readOff = offset
 	return r.readOff, nil
+}
+
+func (r *Reader) seekEnd() (int64, error) {
+	// Check if end was specified:
+	if size := r.s.seekEnd.read(); size >= 0 {
+		return size, nil
+	}
+
+	// Block until closed so we know the true size:
+	if err := r.s.b.Wait(r, maxInt64); err != nil && err != io.EOF {
+		return 0, err
+	}
+	size, _ := r.s.b.Size() // we most be closed to reach here due to ^
+	return size, nil
 }
 
 var (

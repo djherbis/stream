@@ -15,6 +15,7 @@ type Stream struct {
 	b         *broadcaster
 	file      File
 	fs        FileSystem
+	seekEnd   sizeOnce
 	closeOnce onceWithErr
 }
 
@@ -77,6 +78,26 @@ func (s *Stream) Close() error {
 		s.b.Close()
 		return err
 	})
+}
+
+// SetSeekEnd is required in order to support Range Requests. Range Requests
+// require the length of a Stream to be returned by using Reader.Seek with io.SeekEnd.
+// You must set this value to the expected final length of the Stream in order for
+// Range Requests / SeekEnd to work correctly.
+//
+// This method must be called before any such Seek in order to work, and will error
+// if called after a Seek with io.SeekEnd. SeekEnd will still work correctly even
+// if this is not called, but it will block until the entire stream is written in
+// order to actually seek to the true end position.
+//
+// This value can only be set once, subsequent sets will not update the SeekEnd position
+// and will return an error.
+//
+// This method currently has no other affects on the Stream and in particular
+// does not prevent Writing a different amount of bytes and Closing the stream, though this
+// is undefined behavior, and this library reserves the right to define that behavior in the future.
+func (s *Stream) SetSeekEnd(size int64) error {
+	return s.seekEnd.set(size)
 }
 
 // Remove will block until the Stream and all its Readers have been Closed,

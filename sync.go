@@ -206,3 +206,36 @@ func (co *onceWithErr) Do(closeFunc func() error) error {
 	})
 	return co.err
 }
+
+var (
+	errSeekEndAlreadySet = errors.New("seekEnd already set")
+	errSetAfterSeek      = errors.New("seekEnd cannot be set after Seeking to End")
+)
+
+type sizeOnce struct {
+	once sync.Once
+	size int64
+	err  error
+}
+
+func (s *sizeOnce) set(size int64) error {
+	err := errSeekEndAlreadySet
+	s.once.Do(func() {
+		s.size = size
+		err = nil
+	})
+	if s.err != nil {
+		return s.err
+	}
+	return err
+}
+
+func (s *sizeOnce) read() int64 {
+	s.once.Do(func() {
+		s.err = errSetAfterSeek
+	})
+	if s.err != nil {
+		return -1
+	}
+	return s.size
+}
