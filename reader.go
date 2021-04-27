@@ -17,7 +17,7 @@ type Reader struct {
 }
 
 // Name returns the name of the underlying File in the FileSystem.
-func (r *Reader) Name() string { return r.file.Name() }
+func (r *Reader) Name() string { return r.s.name }
 
 // ReadAt lets you Read from specific offsets in the Stream.
 // ReadAt blocks while waiting for the requested section of the Stream to be written,

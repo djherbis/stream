@@ -17,6 +17,7 @@ type Stream struct {
 	fs        FileSystem
 	seekEnd   sizeOnce
 	closeOnce onceWithErr
+	name      string
 }
 
 // New creates a new Stream from the StdFileSystem with Name "name".
@@ -27,19 +28,20 @@ func New(name string) (*Stream, error) {
 // NewStream creates a new Stream with Name "name" in FileSystem fs.
 func NewStream(name string, fs FileSystem) (*Stream, error) {
 	f, err := fs.Create(name)
-	return newStream(f, fs), err
+	return newStream(name, f, fs), err
 }
 
 // NewMemStream creates an in-memory stream with no name, and no underlying fs.
 // This should replace uses of NewStream("name", NewMemFs()).
 // Remove() is unsupported as there is no fs to remove it from.
 func NewMemStream() *Stream {
-	f := newMemFile("")
-	return newStream(f, singletonFs{f})
+	f := newMemFile()
+	return newStream("", f, singletonFs{f})
 }
 
-func newStream(file File, fs FileSystem) *Stream {
+func newStream(name string, file File, fs FileSystem) *Stream {
 	return &Stream{
+		name: name,
 		file: file,
 		fs:   fs,
 		b:    newBroadcaster(),
@@ -57,7 +59,7 @@ func (fs singletonFs) Open(key string) (File, error) { return &memReader{memFile
 func (fs singletonFs) Remove(key string) error { return ErrUnsupported }
 
 // Name returns the name of the underlying File in the FileSystem.
-func (s *Stream) Name() string { return s.file.Name() }
+func (s *Stream) Name() string { return s.name }
 
 // Write writes p to the Stream. It's concurrent safe to be called with Stream's other methods.
 func (s *Stream) Write(p []byte) (int, error) {
@@ -105,7 +107,7 @@ func (s *Stream) SetSeekEnd(size int64) error {
 // ErrRemoving if called after Remove.
 func (s *Stream) Remove() error {
 	s.ShutdownWithErr(ErrRemoving)
-	return s.fs.Remove(s.file.Name())
+	return s.fs.Remove(s.name)
 }
 
 // ShutdownWithErr causes NextReader to stop creating new Readers and instead return err, this
@@ -130,7 +132,7 @@ func (s *Stream) Cancel() error {
 // is written to.
 func (s *Stream) NextReader() (*Reader, error) {
 	return s.b.NewReader(func() (*Reader, error) {
-		file, err := s.fs.Open(s.file.Name())
+		file, err := s.fs.Open(s.name)
 		if err != nil {
 			return nil, err
 		}

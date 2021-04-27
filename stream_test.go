@@ -46,7 +46,6 @@ type slowFile struct {
 	file File
 }
 
-func (r slowFile) Name() string { return r.file.Name() }
 func (r slowFile) Read(p []byte) (int, error) {
 	time.Sleep(5 * time.Millisecond)
 	return r.file.Read(p)
