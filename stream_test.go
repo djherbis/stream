@@ -580,7 +580,7 @@ func testReader(f *Stream, t *testing.T) {
 	r, err := f.NextReader()
 	if err != nil {
 		t.Error(err)
-		t.FailNow()
+		t.Fail()
 	}
 
 	defer func() {
