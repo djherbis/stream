@@ -28,8 +28,8 @@ func (r badFile) ReadAt(p []byte, off int64) (int, error) { return 0, errFail }
 func (r badFile) Write(p []byte) (int, error)             { return 0, errFail }
 func (r badFile) Close() error                            { return errFail }
 
-func (fs badFs) Create(name string) (File, error) { return os.Create(name) }
-func (fs badFs) Open(name string) (File, error) {
+func (fs *badFs) Create(name string) (File, error) { return os.Create(name) }
+func (fs *badFs) Open(name string) (File, error) {
 	if len(fs.readers) > 0 {
 		f := fs.readers[len(fs.readers)-1]
 		fs.readers = fs.readers[:len(fs.readers)-1]
@@ -37,7 +37,7 @@ func (fs badFs) Open(name string) (File, error) {
 	}
 	return nil, errFail
 }
-func (fs badFs) Remove(name string) error { return os.Remove(name) }
+func (fs *badFs) Remove(name string) error { return os.Remove(name) }
 
 type slowFs struct {
 	fs FileSystem
@@ -126,7 +126,7 @@ func TestSingletonFs(t *testing.T) {
 }
 
 func TestBadFile(t *testing.T) {
-	fs := badFs{readers: make([]File, 0, 1)}
+	fs := &badFs{readers: make([]File, 0, 1)}
 	fs.readers = append(fs.readers, badFile{name: "test"})
 	f, err := NewStream("test", fs)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestBadFile(t *testing.T) {
 }
 
 func TestBadFs(t *testing.T) {
-	f, err := NewStream("test", badFs{})
+	f, err := NewStream("test", &badFs{})
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -165,14 +165,12 @@ func TestBadFs(t *testing.T) {
 	defer cleanup(f, t)
 	defer f.Close()
 
-	r, err := f.NextReader()
-	if err == nil {
+	if _, err := f.NextReader(); err == nil {
 		t.Error("expected open error")
 		t.FailNow()
 	} else {
 		return
 	}
-	r.Close()
 }
 
 func TestStd(t *testing.T) {
