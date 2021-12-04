@@ -23,7 +23,7 @@ func (rs *readerSet) drop(r *Reader) *Reader {
 }
 
 func (rs *readerSet) dropAll() (dropped []*Reader) {
-	dropped = make([]*Reader, len(*rs), len(*rs))
+	dropped = make([]*Reader, len(*rs))
 	i := 0
 	for r := range *rs {
 		dropped[i] = r
