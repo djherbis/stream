@@ -4,7 +4,7 @@ stream
 [![GoDoc](https://godoc.org/github.com/djherbis/stream?status.svg)](https://godoc.org/github.com/djherbis/stream)
 [![Release](https://img.shields.io/github/release/djherbis/stream.svg)](https://github.com/djherbis/stream/releases/latest)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE.txt)
-[![Build Status](https://travis-ci.org/djherbis/stream.svg?branch=master)](https://travis-ci.org/djherbis/stream)
+[![go test](https://github.com/djherbis/stream/actions/workflows/go-test.yml/badge.svg)](https://github.com/djherbis/stream/actions/workflows/go-test.yml)
 [![Coverage Status](https://coveralls.io/repos/djherbis/stream/badge.svg?branch=master)](https://coveralls.io/r/djherbis/stream?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/djherbis/stream)](https://goreportcard.com/report/github.com/djherbis/stream)
 
