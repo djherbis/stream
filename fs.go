@@ -7,11 +7,10 @@ import (
 
 // File is a backing data-source for a Stream.
 type File interface {
-	Name() string // The name used to Create/Open the File
-	io.Reader     // Reader must continue reading after EOF on subsequent calls after more Writes.
-	io.ReaderAt   // Similarly to Reader
-	io.Writer     // Concurrent reading/writing must be supported.
-	io.Closer     // Close should do any cleanup when done with the File.
+	io.Reader   // Reader must continue reading after EOF on subsequent calls after more Writes.
+	io.ReaderAt // Similarly to Reader
+	io.Writer   // Concurrent reading/writing must be supported.
+	io.Closer   // Close should do any cleanup when done with the File.
 }
 
 // FileSystem is used to manage Files
