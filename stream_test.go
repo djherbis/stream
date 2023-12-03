@@ -321,6 +321,67 @@ func testCancelBeforeClose(t *testing.T, fs FileSystem) {
 	cleanup(f, t)
 }
 
+func TestCancelWithErrBeforeClose(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testCancelWithErrBeforeClose(t, fs)
+	}
+}
+
+func testCancelWithErrBeforeClose(t *testing.T, fs FileSystem) {
+	wantErr := errors.New("oh dear")
+	f, err := NewStream(t.Name()+".txt", fs)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("Hello"))
+	r, err := f.NextReader() // blocking reader
+	if err != nil {
+		t.Error("error creating new reader: ", err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		_, err := ioutil.ReadAll(r)
+		if err != wantErr {
+			t.Error("Read after cancel should return an error")
+		}
+		wg.Done()
+	}()
+	<-time.After(50 * time.Millisecond) // give Reader time to block, this tests it unblocks
+
+	// When canceling writer, reader is closed, so writer unblocks and test passes
+	f.CancelWithErr(wantErr)
+	// Double cancel should not affect the outcome
+	f.CancelWithErr(wantErr)
+	// Close after cancel should not affect the outcome
+	f.Close()
+
+	// ReadAt after cancel
+	_, err = ioutil.ReadAll(io.NewSectionReader(r, 0, 1))
+	if err != wantErr {
+		t.Error("ReadAt after cancel should return an error")
+	}
+
+	// NextReader should fail as well
+	_, err = f.NextReader()
+	if err != wantErr {
+		t.Error("NextReader should be canceled, but got: ", err)
+	}
+
+	n, err := f.Write([]byte("world"))
+	// Writer is closed as well
+	if err == nil {
+		t.Error("expected write after canceling to fail")
+	}
+	if n != 0 {
+		t.Error("expected write after canceling to not write anything")
+	}
+	wg.Wait()
+	cleanup(f, t)
+}
+
 func TestCancelAfterClose(t *testing.T) {
 	for _, fs := range GetFilesystems() {
 		testCancelAfterClose(t, fs)
@@ -359,6 +420,55 @@ func testCancelAfterClose(t *testing.T, fs FileSystem) {
 		time.Sleep(50 * time.Millisecond)
 		_, err := ioutil.ReadAll(r)
 		if err != ErrCanceled {
+			t.Error("If canceling after closing, already opened readers should finish")
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	cleanup(f, t)
+}
+
+func TestCancelWithErrAfterClose(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testCancelWithErrAfterClose(t, fs)
+	}
+}
+
+func testCancelWithErrAfterClose(t *testing.T, fs FileSystem) {
+	wantErr := errors.New("oh dear")
+	f, err := NewStream(t.Name()+".txt", fs)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	r, _ := f.NextReader()
+
+	wg := sync.WaitGroup{}
+
+	wg.Add(2)
+
+	f.Write([]byte("Hello"))
+	f.Close()
+
+	// This unblocks and cancels any future reads
+	f.CancelWithErr(wantErr)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := f.NextReader()
+		if err != wantErr {
+			t.Error("Opening new reader after canceling should fail")
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := ioutil.ReadAll(r)
+		if err != wantErr {
 			t.Error("If canceling after closing, already opened readers should finish")
 		}
 		wg.Done()
