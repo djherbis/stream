@@ -125,6 +125,13 @@ func (s *Stream) Cancel() error {
 	return s.Close() // all writes are stopped
 }
 
+// CancelWithErr works like Stream.Cancel, but permits a custom error
+// to be returned.
+func (s *Stream) CancelWithErr(err error) error {
+	s.b.CancelWithErr(err) // all existing reads are canceled, no new reads will occur, all readers closed
+	return s.Close()       // all writes are stopped
+}
+
 // NextReader will return a concurrent-safe Reader for this stream. Each Reader will
 // see a complete and independent view of the stream, and can Read while the stream
 // is written to.
