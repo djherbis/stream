@@ -129,9 +129,6 @@ func (s *Stream) Cancel() error {
 // of the generic ErrCanceled, allowing a specific cause to be attached to the cancellation. If err is nil, ErrCanceled
 // is used instead. Only the first call to Cancel/CancelWithErr has any effect; subsequent calls are no-ops.
 func (s *Stream) CancelWithErr(err error) error {
-	if err == nil {
-		err = ErrCanceled
-	}
 	s.b.Cancel(err)  // all existing reads are canceled, no new reads will occur, all readers closed
 	return s.Close() // all writes are stopped
 }

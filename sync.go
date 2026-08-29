@@ -154,11 +154,12 @@ func (b *broadcaster) Size() (size int64, isClosed bool) {
 	return size, isClosed
 }
 
-func (b *broadcaster) isCanceled() bool {
+// canceledWith reports whether the broadcaster is in the canceled state with the given err
+// as its recorded cancellation cause.
+func (b *broadcaster) canceledWith(err error) bool {
 	b.mu.RLock()
-	canceled := b.state == canceledState
-	b.mu.RUnlock()
-	return canceled
+	defer b.mu.RUnlock()
+	return b.state == canceledState && b.canceledErr == err
 }
 
 func (b *broadcaster) addHandle() error {
