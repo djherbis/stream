@@ -120,8 +120,16 @@ func (s *Stream) ShutdownWithErr(err error) {
 
 // Cancel signals that this Stream is forcibly ending, NextReader() will fail, existing readers will fail Reads, all Readers & Writer are Closed.
 // This call is non-blocking, and Remove() after this call is non-blocking.
+// NextReader() and all existing Readers will fail with ErrCanceled.
 func (s *Stream) Cancel() error {
-	s.b.Cancel()     // all existing reads are canceled, no new reads will occur, all readers closed
+	return s.CancelWithErr(ErrCanceled)
+}
+
+// CancelWithErr behaves exactly like Cancel, except NextReader() and all existing Readers will fail with err instead
+// of the generic ErrCanceled, allowing a specific cause to be attached to the cancellation. If err is nil, ErrCanceled
+// is used instead. Only the first call to Cancel/CancelWithErr has any effect; subsequent calls are no-ops.
+func (s *Stream) CancelWithErr(err error) error {
+	s.b.Cancel(err)  // all existing reads are canceled, no new reads will occur, all readers closed
 	return s.Close() // all writes are stopped
 }
 

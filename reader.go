@@ -61,8 +61,7 @@ func (r *Reader) read(p []byte, off *int64) (n int, err error) {
 }
 
 func (r *Reader) checkErr(err error) error {
-	switch err {
-	case ErrCanceled:
+	if r.s.b.isCanceled() {
 		r.Close()
 	}
 	return err

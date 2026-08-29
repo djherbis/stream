@@ -321,6 +321,57 @@ func testCancelBeforeClose(t *testing.T, fs FileSystem) {
 	cleanup(f, t)
 }
 
+func TestCancelWithErr(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testCancelWithErr(t, fs)
+	}
+}
+
+func testCancelWithErr(t *testing.T, fs FileSystem) {
+	errCause := errors.New("upstream write failed")
+
+	f, err := NewStream(t.Name()+".txt", fs)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("Hello"))
+	r, err := f.NextReader() // blocking reader
+	if err != nil {
+		t.Error("error creating new reader: ", err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		_, err := ioutil.ReadAll(r)
+		if err != errCause {
+			t.Error("Read after CancelWithErr should return the given cause")
+		}
+		wg.Done()
+	}()
+	<-time.After(50 * time.Millisecond) // give Reader time to block, this tests it unblocks
+
+	f.CancelWithErr(errCause)
+
+	// NextReader should fail with the given cause as well
+	if _, err := f.NextReader(); err != errCause {
+		t.Error("NextReader should fail with the given cause, but got: ", err)
+	}
+
+	wg.Wait()
+	cleanup(f, t)
+}
+
+func TestCancelWithNilErr(t *testing.T) {
+	f := NewMemStream()
+	f.CancelWithErr(nil)
+	if _, err := f.NextReader(); err != ErrCanceled {
+		t.Error("CancelWithErr(nil) should behave like Cancel(), but got: ", err)
+	}
+	cleanup(f, t)
+}
+
 func TestCancelAfterClose(t *testing.T) {
 	for _, fs := range GetFilesystems() {
 		testCancelAfterClose(t, fs)
