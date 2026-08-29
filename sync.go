@@ -84,14 +84,16 @@ func (b *broadcaster) Close() (err error) {
 	return nil
 }
 
-func (b *broadcaster) Cancel(err error) (retErr error) {
+func (b *broadcaster) Cancel(err error) error {
 	if err == nil {
 		err = ErrCanceled
 	}
 	b.mu.Lock()
-	if b.state != canceledState {
-		b.canceledErr = err
+	if b.state == canceledState {
+		b.mu.Unlock()
+		return nil
 	}
+	b.canceledErr = err
 	b.setState(canceledState)
 	b.preventNewHandles(b.canceledErr)
 	readersToClose := b.rs.dropAll()
@@ -154,12 +156,11 @@ func (b *broadcaster) Size() (size int64, isClosed bool) {
 	return size, isClosed
 }
 
-// canceledWith reports whether the broadcaster is in the canceled state with the given err
-// as its recorded cancellation cause.
-func (b *broadcaster) canceledWith(err error) bool {
+// isCanceled reports whether the broadcaster is in the canceled state.
+func (b *broadcaster) isCanceled() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.state == canceledState && b.canceledErr == err
+	return b.state == canceledState
 }
 
 func (b *broadcaster) addHandle() error {
