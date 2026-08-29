@@ -27,6 +27,7 @@ type broadcaster struct {
 	state        streamState
 	size         int64
 	newHandleErr error
+	canceledErr  error
 	rs           *readerSet
 	fileInUse    sync.WaitGroup
 }
@@ -50,7 +51,7 @@ func (b *broadcaster) Wait(r *Reader, off int64) error {
 
 	switch b.state {
 	case canceledState:
-		return ErrCanceled
+		return b.canceledErr
 
 	case closedState:
 		if off >= b.size {
@@ -83,10 +84,16 @@ func (b *broadcaster) Close() (err error) {
 	return nil
 }
 
-func (b *broadcaster) Cancel() (err error) {
+func (b *broadcaster) Cancel(err error) (retErr error) {
+	if err == nil {
+		err = ErrCanceled
+	}
 	b.mu.Lock()
+	if b.state != canceledState {
+		b.canceledErr = err
+	}
 	b.setState(canceledState)
-	b.preventNewHandles(ErrCanceled)
+	b.preventNewHandles(b.canceledErr)
 	readersToClose := b.rs.dropAll()
 	b.mu.Unlock()
 
@@ -117,8 +124,9 @@ func (b *broadcaster) UseHandle(do func() (int, error)) (int, error) {
 	b.mu.RLock()
 	switch b.state {
 	case canceledState:
+		err := b.canceledErr
 		b.mu.RUnlock()
-		return 0, ErrCanceled
+		return 0, err
 	}
 	b.mu.RUnlock()
 
@@ -144,6 +152,13 @@ func (b *broadcaster) Size() (size int64, isClosed bool) {
 	isClosed = b.state == closedState
 	b.mu.RUnlock()
 	return size, isClosed
+}
+
+func (b *broadcaster) isCanceled() bool {
+	b.mu.RLock()
+	canceled := b.state == canceledState
+	b.mu.RUnlock()
+	return canceled
 }
 
 func (b *broadcaster) addHandle() error {
