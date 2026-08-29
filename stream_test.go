@@ -265,14 +265,15 @@ func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
 // signaling opening once Open has been entered. This lets tests deterministically
 // interleave Cancel with an in-flight NextReader.
 type gateFs struct {
-	fs      FileSystem
-	opening chan struct{}
-	proceed chan struct{}
+	fs          FileSystem
+	opening     chan struct{}
+	openingOnce sync.Once
+	proceed     chan struct{}
 }
 
 func (g *gateFs) Create(name string) (File, error) { return g.fs.Create(name) }
 func (g *gateFs) Open(name string) (File, error) {
-	close(g.opening)
+	g.openingOnce.Do(func() { close(g.opening) })
 	<-g.proceed
 	return g.fs.Open(name)
 }
