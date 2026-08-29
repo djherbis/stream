@@ -188,6 +188,18 @@ func (b *broadcaster) NewReader(createReader func() (*Reader, error)) (*Reader, 
 	}
 
 	b.mu.Lock()
+	if b.newHandleErr != nil {
+		// Cancel/PreventNewHandles ran while we were creating r, and already took its
+		// snapshot of readers to close before r could be registered. r would otherwise
+		// leak a handle and never be closed, so undo the addHandle and close r's file
+		// directly (r was never added to rs, so we must not go through r.Close(), which
+		// would call DropReader and double-drop the handle).
+		err := b.newHandleErr
+		b.mu.Unlock()
+		r.file.Close()
+		b.dropHandle()
+		return nil, err
+	}
 	b.rs.add(r)
 	b.mu.Unlock()
 

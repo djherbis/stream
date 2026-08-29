@@ -261,6 +261,88 @@ func testCloseUnblocksBlockingRead(t *testing.T, fs FileSystem) {
 	cleanup(f, t) // this will deadlock if any arn't Closed
 }
 
+// gateFs wraps a FileSystem and blocks inside Open until proceed is closed,
+// signaling opening once Open has been entered. This lets tests deterministically
+// interleave Cancel with an in-flight NextReader.
+type gateFs struct {
+	fs      FileSystem
+	opening chan struct{}
+	proceed chan struct{}
+}
+
+func (g *gateFs) Create(name string) (File, error) { return g.fs.Create(name) }
+func (g *gateFs) Open(name string) (File, error) {
+	close(g.opening)
+	<-g.proceed
+	return g.fs.Open(name)
+}
+func (g *gateFs) Remove(name string) error { return g.fs.Remove(name) }
+
+func TestCancelDuringNextReader(t *testing.T) {
+	for _, fs := range GetFilesystems() {
+		testCancelDuringNextReader(t, fs)
+	}
+}
+
+// testCancelDuringNextReader exercises the race between NextReader and Cancel:
+// Cancel runs (and takes its snapshot of readers to close) while NextReader has
+// already reserved a handle but hasn't yet finished opening its file/registering
+// its Reader. NextReader must fail with the cancellation error and release the
+// handle it reserved, rather than returning a live Reader that Cancel never saw
+// and that leaks a handle forever.
+func testCancelDuringNextReader(t *testing.T, fs FileSystem) {
+	gate := &gateFs{fs: fs, opening: make(chan struct{}), proceed: make(chan struct{})}
+	f, err := NewStream(t.Name()+".txt", gate)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+	f.Write([]byte("hello"))
+
+	type result struct {
+		r   *Reader
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		r, err := f.NextReader()
+		done <- result{r, err}
+	}()
+
+	// Wait until NextReader has reserved a handle and is blocked opening the file,
+	// then Cancel before NextReader can register its Reader.
+	select {
+	case <-gate.opening:
+	case <-time.After(time.Second):
+		t.Fatal("NextReader never reached Open")
+	}
+	f.Cancel()
+	close(gate.proceed)
+
+	select {
+	case res := <-done:
+		if res.err != ErrCanceled {
+			t.Error("NextReader racing with Cancel should fail with ErrCanceled, got:", res.err)
+		}
+		if res.r != nil {
+			res.r.Close()
+		}
+	case <-time.After(time.Second):
+		t.Fatal("NextReader did not return after Cancel")
+	}
+
+	removed := make(chan struct{})
+	go func() {
+		cleanup(f, t) // this will deadlock if the racing reader's handle leaked
+		close(removed)
+	}()
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("Remove did not complete, the racing reader's handle likely leaked")
+	}
+}
+
 func TestCancelBeforeClose(t *testing.T) {
 	for _, fs := range GetFilesystems() {
 		testCancelBeforeClose(t, fs)
