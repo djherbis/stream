@@ -23,7 +23,14 @@ func (r *Reader) Name() string { return r.file.Name() }
 // ReadAt blocks while waiting for the requested section of the Stream to be written,
 // unless the Stream is closed in which case it will always return immediately.
 func (r *Reader) ReadAt(p []byte, off int64) (n int, err error) {
-	return r.read(p, &off)
+	for {
+		var m int
+		m, err = r.read(p[n:], &off)
+		n += m
+		if err != nil || n == len(p) {
+			return n, err
+		}
+	}
 }
 
 // Read reads from the Stream. If the end of an open Stream is reached, Read
@@ -46,7 +53,7 @@ func (r *Reader) read(p []byte, off *int64) (n int, err error) {
 		*off += int64(m)
 
 		switch {
-		case n != 0 && (err == nil || err == io.EOF):
+		case (n != 0 || len(p) == 0) && (err == nil || err == io.EOF):
 			return n, nil
 
 		case err == io.EOF:
